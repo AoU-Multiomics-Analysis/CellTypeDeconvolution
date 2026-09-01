@@ -1,0 +1,35 @@
+name: R lint
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+    paths:
+      - ".github/workflows/r-lint.yml"
+      - "tools/lint_r.R"
+      - "scripts/**/*.R"
+      - "R/**/*.R"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - ".github/workflows/r-lint.yml"
+      - "tools/lint_r.R"
+      - "scripts/**/*.R"
+      - "R/**/*.R"
+
+jobs:
+  lint-r:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+
+      - name: Install lintr
+        run: Rscript -e 'install.packages("lintr", repos = "https://cloud.r-project.org")'
+
+      - name: Run lintr
+        run: Rscript tools/lint_r.R

@@ -1,0 +1,40 @@
+name: WDL validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+    paths:
+      - ".github/workflows/wdl-validation.yml"
+      - "workflows/**/*.wdl"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - ".github/workflows/wdl-validation.yml"
+      - "workflows/**/*.wdl"
+
+jobs:
+  miniwdl-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Install miniwdl
+        run: pipx install miniwdl
+
+      - name: Check WDLs
+        run: |
+          shopt -s globstar nullglob
+          wdls=(workflows/**/*.wdl)
+
+          if [ ${#wdls[@]} -eq 0 ]; then
+            echo "No WDL files found under workflows/."
+            exit 0
+          fi
+
+          for wdl in "${wdls[@]}"; do
+            echo "Checking ${wdl}"
+            miniwdl check "${wdl}"
+          done

@@ -151,3 +151,17 @@ testthat::test_that("data dictionary uses the implemented overlap interval", {
   )
   testthat::expect_false(grepl("Finite value from 0 through 1", text, fixed = TRUE))
 })
+
+testthat::test_that("final QC guidance does not promise duplicate metrics", {
+  guides <- vapply(
+    c("README.md", "docs/terra.md"),
+    function(path) paste(readLines(
+      testthat::test_path("../..", path), warn = FALSE
+    ), collapse = "\n"),
+    character(1)
+  )
+
+  purrr::walk(guides, function(text) {
+    testthat::expect_false(grepl("duplicate counts", text, fixed = TRUE))
+  })
+})

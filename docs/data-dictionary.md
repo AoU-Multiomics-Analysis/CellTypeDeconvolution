@@ -59,7 +59,7 @@ Set exactly one of `lm22` and `precomputed_proportions`. The workflow records th
 | `tca_model` | `File` | Both | Serialized cohort-wide TCA model. |
 | `tca_model_log` | `File` | Both | TCA model-fit log. |
 | `tca_expression` | `File` | Both | Full TCA `log2_cpm` matrix after constant-gene removal. |
-| `tca_excluded_genes` | `File` | Both | Genes excluded before TCA fitting because they are constant or invalid. |
+| `tca_excluded_genes` | `File` | Both | Genes excluded before TCA fitting because they are constant. |
 | `fit_tca_log` | `File` | Both | TCA-fit task log. |
 | `cell_type_beds` | `Array[File]` | Both | One BED.GZ file for each retained group. Files preserve coordinates, modeled-gene order, and sample order. |
 | `cell_type_bed_inventory` | `File` | Both | BED output inventory with stable basenames, dimensions, and scale. |

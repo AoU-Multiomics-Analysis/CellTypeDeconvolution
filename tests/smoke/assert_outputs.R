@@ -234,16 +234,20 @@ qc_summary <- readr::read_tsv(
   progress = FALSE
 )
 required_qc_metrics <- c(
+  "gene_count", "sample_count", "cell_group_count",
+  "excluded_constant_gene_count",
+  "correlation_min", "correlation_median", "correlation_mean",
+  "correlation_max", "rmse_min", "rmse_median", "rmse_mean",
+  "rmse_max", "lm22_gene_count", "lm22_cell_type_count",
   "lm22_value_validation", "lm22_value_min", "lm22_value_max",
   "input_proportion_max_row_sum_error",
   "combined_proportion_max_row_sum_error",
   "adjusted_weight_max_row_sum_error",
   "normalization_adjustment_max_abs", "zero_values_adjusted",
-  "duplicate_gene_symbol_input_row_count", "duplicate_gene_symbol_count",
   "tca_internal_iterations", "tca_max_internal_iterations",
   "tca_convergence", "tca_tau_hat"
 )
-stopifnot(all(required_qc_metrics %in% qc_summary$metric))
+stopifnot(setequal(required_qc_metrics, qc_summary$metric))
 qc_status <- stats::setNames(qc_summary$status, qc_summary$metric)
 if (identical(expected_proportion_mode, "dtangle")) {
   stopifnot(identical(qc_status[["lm22_value_validation"]], "passed"))
@@ -258,16 +262,21 @@ stopifnot(qc_status[["tca_convergence"]] %in% c(
 ))
 
 required_file_outputs <- c(
-  "prepared_tca_cpm", "prepared_tca_log2_cpm",
-  "prepared_dtangle_cpm", "prepared_dtangle_log2_cpm",
-  "prepared_coordinates", "mapping_report",
-  "prepare_excluded_genes", "prepare_log", "proportion_mode_validation_log",
-  "cell_group_filter_report",
-  "proportions_log", "tca_model", "tca_model_log", "tca_excluded_genes",
-  "fit_tca_log", "qc_summary", "qc_plots", "export_log",
-  "export_detail_log", "output_manifest", "output_inventory", "manifest_log",
-  "effective_parameters_file"
+  "proportion_mode_validation_log", "proportions_lm22",
+  "proportions_combined", "tca_weights", "cell_group_filter_report",
+  "proportions_log", "tca_model", "tca_model_log", "tca_expression",
+  "tca_excluded_genes", "fit_tca_log", "cell_type_bed_inventory",
+  "reconstruction_by_sample", "qc_summary", "qc_plots", "export_log",
+  "export_detail_log", "output_manifest", "output_inventory",
+  "manifest_log", "effective_parameters_file"
 )
+if (identical(expected_proportion_mode, "dtangle")) {
+  required_file_outputs <- c(required_file_outputs, c(
+    "estimated_proportions", "dtangle_markers", "dtangle_metadata",
+    "dtangle_overlap_report", "transformed_lm22", "dtangle_shared_bulk",
+    "dtangle_log"
+  ))
+}
 purrr::walk(required_file_outputs, function(name) {
   stopifnot(file.exists(output_value(name)))
 })

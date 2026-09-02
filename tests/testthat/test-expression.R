@@ -136,6 +136,36 @@ testthat::test_that("BED validation rejects invalid coordinates and duplicate ID
   testthat::expect_error(read_expression_bed(path), "start.*less than.*end")
 })
 
+testthat::test_that("BED validation rejects a missing chromosome", {
+  path <- tempfile(fileext = ".bed")
+  readr::write_tsv(
+    tibble::tibble(
+      `#chr` = NA_character_, start = 0L, end = 10L,
+      gene_id = "g1", S1 = 1
+    ),
+    path,
+    na = ""
+  )
+
+  testthat::expect_error(
+    read_expression_bed(path),
+    "chromosome.*gene_id.*must not be missing.*empty"
+  )
+})
+
+testthat::test_that("BED validation rejects a negative start", {
+  path <- tempfile(fileext = ".bed")
+  readr::write_tsv(
+    tibble::tibble(
+      `#chr` = "chr1", start = -1L, end = 10L,
+      gene_id = "g1", S1 = 1
+    ),
+    path
+  )
+
+  testthat::expect_error(read_expression_bed(path), "non-negative.*less than.*end")
+})
+
 testthat::test_that("BED validation rejects non-positive, missing, and nonfinite CPM values", {
   invalid_values <- c("0", "-1", "", "Inf")
 

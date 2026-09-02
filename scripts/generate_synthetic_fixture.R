@@ -166,7 +166,6 @@ writeLines(cell_groups, file.path(output_directory, "expected_groups.txt"))
 common_inputs <- list(
   "cell_type_deconvolution.expression" = "tests/fixtures/synthetic_expression.bed",
   "cell_type_deconvolution.gtf" = "tests/fixtures/synthetic.gtf",
-  "cell_type_deconvolution.covariates" = "tests/fixtures/batch_indicator.tsv",
   "cell_type_deconvolution.docker_image" = "celltype-deconvolution:test",
   "cell_type_deconvolution.preemptible_attempts" = 2L,
   "cell_type_deconvolution.max_retries" = 2L,
@@ -197,7 +196,9 @@ dtangle_inputs <- append(
   common_inputs,
   list(
     "cell_type_deconvolution.lm22" =
-      "tests/fixtures/synthetic_signature.tsv"
+      "tests/fixtures/synthetic_signature.tsv",
+    "cell_type_deconvolution.covariates" =
+      "tests/fixtures/batch_indicator.tsv"
   ),
   after = 2L
 )

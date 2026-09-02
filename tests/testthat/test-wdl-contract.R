@@ -117,6 +117,31 @@ testthat::test_that("smoke assertions require unique compressed BED paths", {
   ), ~ testthat::expect_match(smoke_assertions, .x, fixed = TRUE))
 })
 
+testthat::test_that("smoke assertions reject obsolete preparation outputs and QC metrics", {
+  smoke_assertions <- paste(
+    readLines(testthat::test_path("..", "smoke", "assert_outputs.R")),
+    collapse = "\n"
+  )
+  obsolete_output_names <- c(
+    "prepared_tca_cpm", "prepared_tca_log2_cpm",
+    "prepared_dtangle_cpm", "prepared_dtangle_log2_cpm",
+    "prepared_coordinates", "mapping_report",
+    "prepare_excluded_genes", "prepare_log"
+  )
+  obsolete_qc_metrics <- c(
+    "duplicate_gene_symbol_input_row_count",
+    "duplicate_gene_symbol_count"
+  )
+
+  purrr::walk(
+    c(obsolete_output_names, obsolete_qc_metrics),
+    ~ testthat::expect_false(
+      grepl(.x, smoke_assertions, fixed = TRUE),
+      info = .x
+    )
+  )
+})
+
 expect_task_contract <- function(path, task, inputs, outputs, defaults) {
   text <- wdl_text(path)
   testthat::expect_match(text, paste0("task ", task))
@@ -344,6 +369,13 @@ testthat::test_that("synthetic smoke fixtures are deterministic and restart with
   dtangle <- jsonlite::read_json(file.path(first, "dtangle.inputs.json"))
   testthat::expect_false("cell_type_deconvolution.lm22" %in% names(restart))
   testthat::expect_false(
+    "cell_type_deconvolution.covariates" %in% names(restart)
+  )
+  testthat::expect_identical(
+    dtangle$cell_type_deconvolution.covariates,
+    "tests/fixtures/batch_indicator.tsv"
+  )
+  testthat::expect_false(
     "cell_type_deconvolution.parameters_json" %in% names(restart)
   )
   testthat::expect_false(
@@ -403,6 +435,23 @@ testthat::test_that("synthetic smoke fixtures are deterministic and restart with
       ignore.case = TRUE
     )))
   })
+})
+
+testthat::test_that("checked-in restart smoke input omits covariates", {
+  restart <- jsonlite::read_json(testthat::test_path(
+    "..", "fixtures", "restart.inputs.json"
+  ))
+  dtangle <- jsonlite::read_json(testthat::test_path(
+    "..", "fixtures", "dtangle.inputs.json"
+  ))
+
+  testthat::expect_false(
+    "cell_type_deconvolution.covariates" %in% names(restart)
+  )
+  testthat::expect_identical(
+    dtangle$cell_type_deconvolution.covariates,
+    "tests/fixtures/batch_indicator.tsv"
+  )
 })
 
 testthat::test_that("all modular WDL tasks declare CLI-aligned interfaces", {

@@ -60,13 +60,16 @@ run_export_tca_beds <- function() {
   } else {
     read_numeric_matrix(options$covariates, "sample_id")
   }
+  if (!is.null(C2) && ncol(C2) == 0L) {
+    C2 <- NULL
+  }
   if (!identical(colnames(X), rownames(weights))) {
     stop("Weight sample order must match expression sample order exactly", call. = FALSE)
   }
   if (!identical(colnames(weights), colnames(model$W))) {
     stop("Weight group order must match the TCA model exactly", call. = FALSE)
   }
-  if (!is.null(C2) && ncol(C2) > 0L && !identical(rownames(C2), colnames(X))) {
+  if (!is.null(C2) && !identical(rownames(C2), colnames(X))) {
     stop("Covariate sample order must match expression sample order exactly", call. = FALSE)
   }
   excluded_constant_genes <- count_excluded_constant_genes(
@@ -97,13 +100,16 @@ run_export_tca_beds <- function() {
 
   tensor <- extract_full_tensor(X, model, options$num_cores, export_log_path)
   bed_result <- write_cell_type_beds(tensor, coordinates, options$output_dir)
+  deltas_hat <- if (is.null(C2)) {
+    NULL
+  } else {
+    model$deltas_hat[rownames(X), colnames(C2), drop = FALSE]
+  }
   reconstructed <- reconstruct_tensor(
     tensor,
     weights,
     C2,
-    if (is.null(C2)) NULL else model$deltas_hat[
-      rownames(X), colnames(C2), drop = FALSE
-    ]
+    deltas_hat
   )
   statistics <- initialize_reconstruction_stats(colnames(X)) |>
     update_reconstruction_stats(X, reconstructed)

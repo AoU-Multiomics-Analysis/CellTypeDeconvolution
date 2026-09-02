@@ -24,13 +24,21 @@ read_expression_bed <- function(path) {
       gene_id = trimws(.data$gene_id)
     )
   if (anyNA(coordinates$start) || anyNA(coordinates$end) ||
+      any(coordinates$start < 0L) ||
       any(coordinates$start >= coordinates$end)) {
-    stop("BED start must be an integer less than end", call. = FALSE)
+    stop("BED start must be a non-negative integer less than end", call. = FALSE)
   }
-  if (any(!nzchar(coordinates[["#chr"]])) ||
+  if (anyNA(coordinates[["#chr"]]) || anyNA(coordinates$gene_id) ||
+      any(!nzchar(coordinates[["#chr"]])) ||
       any(!nzchar(coordinates$gene_id)) ||
       anyDuplicated(coordinates$gene_id) > 0L) {
-    stop("BED chromosome and gene_id values must be non-empty and unique", call. = FALSE)
+    stop(
+      paste0(
+        "BED chromosome and gene_id values must not be missing or empty. ",
+        "gene_id values must be unique."
+      ),
+      call. = FALSE
+    )
   }
   sample_ids <- names(table)[-(seq_along(required))]
   if (any(!nzchar(sample_ids)) || anyDuplicated(sample_ids) > 0L) {

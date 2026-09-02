@@ -171,6 +171,127 @@ testthat::test_that("reconstruction includes the fitted C2 term", {
   testthat::expect_equal(observed, expected)
 })
 
+testthat::test_that("TCA export reconstructs without optional covariates", {
+  working_directory <- tempfile("export-without-covariates-")
+  package_directory <- file.path(working_directory, "TCA")
+  library_directory <- file.path(working_directory, "library")
+  output_directory <- file.path(working_directory, "outputs")
+  dir.create(file.path(package_directory, "R"), recursive = TRUE)
+  dir.create(library_directory)
+  writeLines(c(
+    "Package: TCA",
+    "Title: Focused Export Test Double",
+    "Version: 1.2.1",
+    "Description: Supplies the tensor boundary for one export integration test.",
+    "License: MIT",
+    "Encoding: UTF-8"
+  ), file.path(package_directory, "DESCRIPTION"))
+  writeLines("export(tensor)", file.path(package_directory, "NAMESPACE"))
+  writeLines(c(
+    "tensor <- function(X, tca.mdl, ...) {",
+    "  tca.mdl$test_tensor",
+    "}"
+  ), file.path(package_directory, "R", "tensor.R"))
+  install_status <- system2(
+    file.path(R.home("bin"), "R"),
+    c("CMD", "INSTALL", paste0("--library=", library_directory), package_directory),
+    stdout = FALSE,
+    stderr = FALSE
+  )
+  testthat::expect_identical(install_status, 0L)
+  if (!identical(install_status, 0L)) {
+    return(invisible(NULL))
+  }
+
+  gene_ids <- c("g1", "g2", "g3")
+  sample_ids <- c("S1", "S2")
+  cell_groups <- c("A", "B")
+  tensor <- list(
+    A = matrix(
+      c(1, 4, 2, 6, 4, 10),
+      nrow = 3L,
+      byrow = TRUE,
+      dimnames = list(gene_ids, sample_ids)
+    ),
+    B = matrix(
+      c(5, 2, 6, 3, 8, 5),
+      nrow = 3L,
+      byrow = TRUE,
+      dimnames = list(gene_ids, sample_ids)
+    )
+  )
+  weights <- matrix(
+    c(0.25, 0.75, 0.60, 0.40),
+    nrow = 2L,
+    byrow = TRUE,
+    dimnames = list(sample_ids, cell_groups)
+  )
+  tca_expression <- tensor$A |>
+    sweep(2L, weights[, "A"], "*")
+  tca_expression <- tca_expression + sweep(
+    tensor$B,
+    2L,
+    weights[, "B"],
+    "*"
+  )
+  coordinates <- tibble::tibble(
+    `#chr` = c("chr1", "chr1", "chr2"),
+    start = c(0L, 10L, 20L),
+    end = c(5L, 15L, 25L),
+    gene_id = gene_ids
+  )
+  expression_path <- file.path(working_directory, "expression.bed")
+  tca_expression_path <- file.path(working_directory, "tca_expression.tsv")
+  weights_path <- file.path(working_directory, "weights.tsv")
+  model_path <- file.path(working_directory, "model.rds")
+  command_log <- file.path(working_directory, "command.log")
+  write_expression_bed(expression_path, coordinates, 2^tca_expression)
+  write_numeric_matrix(tca_expression, tca_expression_path, "gene_id")
+  write_numeric_matrix(weights, weights_path, "sample_id")
+  model <- list(
+    W = weights,
+    C2 = matrix(numeric(), nrow = length(sample_ids), ncol = 0L),
+    deltas_hat = matrix(
+      seq_along(gene_ids),
+      nrow = length(gene_ids),
+      dimnames = list(gene_ids, "unused")
+    ),
+    test_tensor = tensor
+  )
+  saveRDS(model, model_path)
+  script <- testthat::test_path("../..", "scripts", "export_tca_beds.R")
+  arguments <- c(
+    script,
+    "--expression", expression_path,
+    "--tca-expression", tca_expression_path,
+    "--model", model_path,
+    "--weights", weights_path,
+    "--num-cores", "1",
+    "--output-dir", output_directory
+  )
+  status <- system2(
+    "Rscript",
+    shQuote(arguments),
+    stdout = command_log,
+    stderr = command_log,
+    env = paste0("R_LIBS=", shQuote(library_directory))
+  )
+  command_output <- paste(readLines(command_log, warn = FALSE), collapse = "\n")
+
+  testthat::expect_identical(status, 0L, info = command_output)
+  if (!identical(status, 0L)) {
+    return(invisible(NULL))
+  }
+  reconstruction <- readr::read_tsv(
+    file.path(output_directory, "reconstruction_by_sample.tsv"),
+    show_col_types = FALSE,
+    progress = FALSE
+  )
+  testthat::expect_identical(reconstruction$sample_id, sample_ids)
+  testthat::expect_equal(reconstruction$rmse, c(0, 0), tolerance = 1e-12)
+  testthat::expect_true(all(is.finite(reconstruction$correlation)))
+})
+
 testthat::test_that("reconstruction statistics combine genes by sample", {
   observed <- matrix(
     c(1, 2, 2, 4, 3, 5, 6, 10), nrow = 4, byrow = TRUE,

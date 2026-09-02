@@ -51,7 +51,7 @@ The workflow does one direct tensor extraction. It writes one BED.GZ file per re
 
 The workflow writes proportions, filter reports, the fitted TCA model, a BED inventory, reconstruction quality control, logs, an output inventory, and a machine-readable manifest. `cell_type_beds` is the authoritative file array. Public inventories and the manifest use stable BED basenames, so task-localized paths do not leak into metadata. The manifest task keeps localized paths only while it calculates checksums.
 
-The final QC summary records LM22 value validation in dtangle mode. It also records maximum proportion row-sum errors, normalization adjustment, adjusted-zero counts, duplicate counts, constant-gene exclusions, reconstruction metrics, and TCA convergence. TCA 1.2.1 does not put a convergence field in its model object. The workflow derives the convergence status and iteration count from the TCA model log.
+The final QC summary records LM22 value validation in dtangle mode. It also records maximum proportion row-sum errors, normalization adjustment, adjusted-zero counts, constant-gene exclusions, reconstruction metrics, and TCA convergence. TCA 1.2.1 does not put a convergence field in its model object. The workflow derives the convergence status and iteration count from the TCA model log.
 
 Migration note: the workflow does not produce HDF5 or tensor shards. Preparation outputs and a pipeline-version output are no longer available.
 

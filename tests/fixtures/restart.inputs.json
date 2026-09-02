@@ -2,7 +2,6 @@
   "cell_type_deconvolution.expression": "tests/fixtures/synthetic_expression.bed",
   "cell_type_deconvolution.gtf": "tests/fixtures/synthetic.gtf",
   "cell_type_deconvolution.precomputed_proportions": "tests/fixtures/precomputed_proportions.tsv",
-  "cell_type_deconvolution.covariates": "tests/fixtures/batch_indicator.tsv",
   "cell_type_deconvolution.docker_image": "celltype-deconvolution:test",
   "cell_type_deconvolution.preemptible_attempts": 2,
   "cell_type_deconvolution.max_retries": 2,

@@ -1,26 +1,26 @@
 # Run the workflow in Terra
 
-Import `workflows/cell_type_deconvolution.wdl` into a Terra workspace. Use [cpm.inputs.json](../examples/cpm.inputs.json) for dtangle mode. Use [precomputed-proportions.inputs.json](../examples/precomputed-proportions.inputs.json) for restart mode. Replace every `gs://YOUR_BUCKET/...` path with a path that your Terra billing project can read.
+Import `workflows/cell_type_deconvolution.wdl` into a Terra workspace. Use [bed.inputs.json](../examples/bed.inputs.json) for dtangle mode. Use [precomputed-proportions.inputs.json](../examples/precomputed-proportions.inputs.json) for precomputed mode. Replace each `gs://YOUR_BUCKET/...` path with a path that your billing project can read.
 
 ## Required data
 
-`expression` is a gene-by-sample normalized CPM matrix in TSV or compressed TSV format. Its first column is `gene_id`. Every CPM value must be finite and strictly positive. The workflow stops on zero or negative values. It does not calculate CPM, renormalize CPM, or add a pseudocount.
+`expression` is a tab-delimited BED or BED.GZ matrix. Its leading columns are `#chr`, `start`, `end`, and `gene_id`, in that order. Remaining columns are samples. CPM values must be finite, strictly positive, and on the linear scale. The workflow stops on zero or negative values. It does not calculate CPM, renormalize CPM, or add a pseudocount.
 
-`gtf` is a GTF or GTF.GZ file. It must have `gene` records with `gene_id` and `gene_name` attributes. The workflow does not filter on `gene_type` or `gene_biotype`. It matches expression and GTF identifiers by exact text after trimming surrounding white space. It removes rows with no usable gene name and sums CPM values for duplicate gene names.
+`gtf` is a GTF or GTF.GZ file. It needs `gene` records with `gene_id` and `gene_name`. No gene-type filter is applied. The workflow trims surrounding white space before identifier matching. Matching is otherwise exact.
+
+The TCA view keeps mapped input `gene_id` rows, coordinates, and row order. Rows that share a gene symbol stay separate. The dtangle view uses gene symbols and sums linear CPM for duplicated symbols. This creates one dtangle value per symbol without losing TCA coordinate identity.
 
 ## Select a proportion mode
 
-Use dtangle mode when you set `lm22` and omit `precomputed_proportions`. LM22 is user-supplied. It must be the standard linear LM22 matrix with one gene-symbol column and the 22 standard LM22 cell-type columns. Values must be finite and strictly positive. The workflow applies `log2()` once. It does not infer the LM22 scale.
+Use dtangle mode when you set `lm22` and omit `precomputed_proportions`. LM22 is user-supplied. It must be a linear LM22 matrix with one gene-symbol column and the 22 standard cell-type columns. Values must be finite and strictly positive. The workflow applies `log2()` once.
 
-Use restart mode when you set `precomputed_proportions` and omit `lm22`. The file must contain one sample identifier column and all 22 standard LM22 proportion columns. Its sample IDs must match the prepared expression matrix.
+Use precomputed mode when you set `precomputed_proportions` and omit `lm22`. The input needs one sample identifier column and all 22 standard LM22 proportion columns. Sample IDs must match the prepared expression matrix.
 
-Both modes require `expression`, `gtf`, and `docker_image`. Use a published GHCR image tag in Terra. `celltype-deconvolution:test` is the local test image for repository smoke runs. It is not a production Terra image.
+Both modes require `expression`, `gtf`, and `docker_image`. Use a published GHCR image tag in Terra. `celltype-deconvolution:test` is only for repository smoke runs.
 
 ## Analysis settings
 
-The workflow creates `log2(CPM)` without a pseudocount. In dtangle mode, it intersects the prepared bulk data with LM22 genes and preserves LM22 gene order. dtangle uses RNA-seq mixture data, `marker_method = "ratio"`, and a default marker fraction of `0.10`. The minimum LM22 overlap is `0.80`.
-
-Joint quantile normalization is off by default. If you set `dtangle_quantile_normalize` to `true`, it applies once to the joined log-scale LM22 and bulk profiles. It applies only to the dtangle input. It does not change the expression matrix used by TCA.
+The workflow creates `log2(CPM)` without a pseudocount. In dtangle mode, it keeps LM22 gene order. dtangle uses RNA-seq mixtures, `marker_method = "ratio"`, a marker fraction of `0.10`, and a minimum LM22 overlap of `0.80`. Joint quantile normalization is off by default. If enabled, it changes only the joined dtangle reference and mixture data. It does not change the TCA matrix.
 
 The workflow combines the 22 LM22 types into ten groups:
 
@@ -37,21 +37,23 @@ The workflow combines the 22 LM22 types into ten groups:
 | Dendritic cells | Dendritic cells resting; Dendritic cells activated |
 | Mast cells | Mast cells resting; Mast cells activated |
 
-T follicular helper and regulatory T cells are in CD4 T cells. Gamma-delta T cells remain separate. The workflow removes a group when its cohort mean is below `0.0001` (0.01%). No group is forced to remain. It replaces retained exact zeros with the configurable `zero_floor`, then normalizes each sample row to one.
+T follicular helper and regulatory T cells are in CD4 T cells. Gamma-delta T cells stay separate. A group is retained only when its cohort mean is at least `0.0001` (0.01%). No group is forced to remain. Retained exact zeros use `zero_floor`, then each sample row is normalized to one.
 
-TCA fits one cohort-wide model with `refit_W = FALSE`. It uses the full mapped `log2(CPM)` expression matrix after removal of constant genes. It does not use only LM22-shared genes. Optional covariates are mixture-level technical covariates.
+TCA fits one full-matrix model with `refit_W = FALSE`. It uses mapped, nonconstant genes from the complete `log2(CPM)` TCA matrix. It does not use only LM22-shared genes. Optional covariates are mixture-level technical covariates.
 
 ## Resources and outputs
 
-The default resources support an initial whole-blood run of about 9,000 samples. The TCA fitting task defaults to 16 CPU, 192 GB memory, and 750 GB disk. The assembly task defaults to 8 CPU, 128 GB memory, and 500 GB disk. The default TCA shard size is 500 genes. Adjust runtime inputs only after you inspect your cohort size and storage requirements.
+Default resources support an initial whole-blood run of about 9,000 samples. TCA fitting uses 16 CPU, 192 GB memory, and 750 GB disk by default. Direct BED export uses 8 CPU, 128 GB memory, 500 GB disk, 0 preemptible attempts, and 1 retry by default. Change runtime inputs only after you inspect cohort size and storage needs.
 
-Each retained group has one HDF5 matrix. The `expression` dataset has genes in rows and samples in columns. The file also contains `gene_name` and `sample_id` datasets. Attributes record the cell-group name, the `log2_cpm` scale, the pipeline version, and the TCA version. These matrices contain inferred log-expression estimates. They are not counts, linear CPM, or absolute expression values. Set `write_tsv` to `true` only when compressed TSV copies are required.
+The workflow does one direct tensor extraction. It writes one BED.GZ file per retained major cell group. Each file uses the `log2_cpm` model scale. It preserves `#chr`, `start`, `end`, `gene_id`, modeled-gene order, and sample-column order. It excludes unmapped and constant genes. The values are statistical TCA estimates. They are not counts, linear CPM, or absolute expression values.
 
-The workflow also writes proportions, filtering reports, the fitted TCA model, gene-shard records, reconstruction quality control, logs, an output inventory, and a machine-readable manifest. See [the data dictionary](data-dictionary.md) for exact names.
+The workflow writes proportions, filter reports, the fitted TCA model, a BED inventory, reconstruction quality control, logs, an output inventory, and a machine-readable manifest. See [the data dictionary](data-dictionary.md) for exact names.
+
+Migration note: the workflow does not produce HDF5 or tensor shards.
 
 ## Validation and support
 
-GitHub Actions builds the pinned project image. It runs R lint and tests, validates WDL and command logging, and runs dtangle and restart smoke workflows. The smoke workflows assert the declared output structure. The project does not require a local Docker build for a smoke test.
+GitHub Actions builds the pinned image. It runs R lint, R tests, WDL validation, command-logging checks, and dtangle and precomputed smoke workflows. The smoke workflows check BED coordinates and sample order. A local Docker build is not required for a smoke test.
 
 LM22 is not distributed with this repository. Review and comply with the LM22 source license and terms before use.
 
@@ -60,10 +62,6 @@ LM22 is not distributed with this repository. Review and comply with the LM22 so
 - LM22 estimates relative immune proportions. It does not estimate absolute blood-cell counts.
 - LM22 was derived from microarray data. RNA-seq and reference platform differences can affect estimates.
 - LM22 does not model erythrocyte or platelet expression.
-- The Monocyte/myeloid group includes macrophage states. It is not a pure monocyte estimate.
-- The default path has no quantile normalization. Use it only as a sensitivity analysis.
-- TCA outputs are statistical estimates. They are not directly measured cell-type-specific expression values.
-- CPM zeros stop preparation. The workflow does not add a pseudocount.
-- Identifier matching is exact after trimming. Different identifier systems can reduce overlap.
-- Retained groups can differ by cohort because the mean filter is cohort-specific.
+- Retained groups are cohort-specific because the mean filter uses the cohort.
 - Very small proportions can be unstable, even after the zero floor is applied.
+- TCA outputs are statistical estimates. They are not directly measured cell-type-specific expression values.

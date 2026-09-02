@@ -68,6 +68,15 @@ testthat::test_that("the expression WDL requires CPM and GTF", {
 testthat::test_that("top workflow uses one direct BED export", {
   text <- wdl_text("workflows/cell_type_deconvolution.wdl")
   testthat::expect_match(text, "call tca_tasks.ExportTcaBeds", fixed = TRUE)
+  testthat::expect_identical(
+    stringr::str_count(text, "call tca_tasks.ExportTcaBeds"),
+    1L
+  )
+  purrr::walk(c(
+    "Int export_cpu = 8", "String export_memory = \"128 GB\"",
+    "Int export_disk_gb = 500", "Int export_preemptible_attempts = 0",
+    "Int export_max_retries = 1"
+  ), ~ testthat::expect_match(text, .x, fixed = TRUE))
   testthat::expect_match(text, "Array[File] cell_type_beds", fixed = TRUE)
   testthat::expect_match(
     text,

@@ -1,0 +1,8 @@
+{
+  "cell_type_deconvolution.expression": "gs://YOUR_BUCKET/input/whole_blood.cpm.tsv.gz",
+  "cell_type_deconvolution.gtf": "gs://YOUR_BUCKET/reference/annotation.gtf.gz",
+  "cell_type_deconvolution.lm22": "gs://YOUR_BUCKET/reference/LM22.txt",
+  "cell_type_deconvolution.docker_image": "ghcr.io/aou-multiomics-analysis/celltypedeconvolution:latest",
+  "cell_type_deconvolution.pipeline_version": "0.1.0",
+  "cell_type_deconvolution.write_tsv": false
+}

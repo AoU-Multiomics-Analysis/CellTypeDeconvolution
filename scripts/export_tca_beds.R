@@ -36,6 +36,8 @@ read_bed_coordinates <- function(path) {
 
 run_export_tca_beds <- function() {
   option_list <- list(
+    optparse::make_option("--expression", type = "character",
+      help = "Coordinate-preserving BED of positive linear CPM values."),
     optparse::make_option("--expression-log", dest = "expression_log", type = "character",
       help = "Filtered gene-by-sample log2(CPM) TSV with gene_id first column."),
     optparse::make_option("--coordinates", type = "character",
@@ -54,7 +56,19 @@ run_export_tca_beds <- function() {
       help = "Export detail log path.")
   )
   options <- optparse::parse_args(optparse::OptionParser(option_list = option_list))
-  required_options <- c("expression_log", "coordinates", "model", "weights", "output_dir")
+  coordinate_options <- c("expression", "coordinates")
+  selected_coordinate_options <- coordinate_options[vapply(
+    options[coordinate_options],
+    function(value) !is.null(value) && nzchar(value),
+    logical(1)
+  )]
+  if (length(selected_coordinate_options) != 1L) {
+    stop(
+      "Specify exactly one of --expression or --coordinates",
+      call. = FALSE
+    )
+  }
+  required_options <- c("expression_log", "model", "weights", "output_dir")
   missing_options <- required_options[vapply(
     options[required_options],
     function(value) is.null(value) || !nzchar(value),
@@ -77,7 +91,12 @@ run_export_tca_beds <- function() {
   ))
 
   X <- read_numeric_matrix(options$expression_log, "gene_id")
-  coordinates <- read_bed_coordinates(options$coordinates)
+  coordinates <- if (!is.null(options$expression) && nzchar(options$expression)) {
+    expression <- read_expression_bed(options$expression)
+    expression$coordinates
+  } else {
+    read_bed_coordinates(options$coordinates)
+  }
   weights <- read_numeric_matrix(options$weights, "sample_id")
   model <- readRDS(options$model)
   C2 <- if (is.null(options$covariates) || !nzchar(options$covariates)) {
@@ -112,7 +131,7 @@ run_export_tca_beds <- function() {
   )
   paths_message <- sprintf(
     "stage=export_tca_beds input_paths=%s output_dir=%s",
-    paste(c(options$expression_log, options$coordinates, options$model, options$weights,
+    paste(c(options$expression_log, options[[selected_coordinate_options]], options$model, options$weights,
       options$covariates), collapse = ","), options$output_dir
   )
   message(dimensions_message)

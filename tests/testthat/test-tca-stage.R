@@ -131,6 +131,15 @@ testthat::test_that("the TCA CLI does not create shard artifacts", {
   testthat::expect_false(grepl("--shard-size", text, fixed = TRUE))
 })
 
+testthat::test_that("TCA fit reads a direct CPM BED", {
+  text <- paste(readLines(
+    testthat::test_path("../..", "scripts", "fit_tca.R"),
+    warn = FALSE
+  ), collapse = "\n")
+  testthat::expect_match(text, '"--expression"', fixed = TRUE)
+  testthat::expect_match(text, "make_tca_expression(expression)", fixed = TRUE)
+})
+
 testthat::test_that("one model fits all genes without refitting weights", {
   testthat::skip_if_not_installed("TCA")
   testthat::expect_identical(as.character(utils::packageVersion("TCA")), "1.2.1")

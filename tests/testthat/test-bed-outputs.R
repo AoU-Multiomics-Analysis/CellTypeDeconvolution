@@ -1,5 +1,9 @@
 source(testthat::test_path("helper-load.R"), local = .GlobalEnv)
 
+expression_path <- testthat::test_path("../..", "R", "expression.R")
+if (file.exists(expression_path)) {
+  source(expression_path, local = .GlobalEnv)
+}
 expression_bed_path <- testthat::test_path("../..", "R", "expression_bed.R")
 if (file.exists(expression_bed_path)) {
   source(expression_bed_path, local = .GlobalEnv)
@@ -52,6 +56,40 @@ testthat::test_that("cell-type BED files preserve coordinates and sample order",
     c("cd4_t_cells.bed.gz", "cd8_t_cells.bed.gz")
   )
   testthat::expect_true(all(result$inventory$scale == "log2_cpm"))
+})
+
+testthat::test_that("direct CPM BED coordinates align to filtered TCA genes", {
+  source_coordinates <- tibble::tibble(
+    `#chr` = c("chr2", "chr1", "chr3"),
+    start = c(20L, 10L, 30L),
+    end = c(30L, 15L, 40L),
+    gene_id = c("g2", "g1", "g3")
+  )
+  source_cpm <- matrix(
+    c(4, 8, 16, 32, 64, 128),
+    nrow = 3L,
+    byrow = TRUE,
+    dimnames = list(source_coordinates$gene_id, c("S1", "S2"))
+  )
+  expression_path <- tempfile(fileext = ".bed.gz")
+  write_expression_bed(expression_path, source_coordinates, source_cpm)
+
+  expression <- read_expression_bed(expression_path)
+  modeled_gene_ids <- c("g2", "g3")
+  coordinate_index <- match(modeled_gene_ids, expression$coordinates$gene_id)
+  aligned_coordinates <- expression$coordinates[coordinate_index, , drop = FALSE]
+
+  testthat::expect_identical(aligned_coordinates$gene_id, modeled_gene_ids)
+  testthat::expect_identical(aligned_coordinates$start, c(20L, 30L))
+})
+
+testthat::test_that("TCA export reads a direct CPM BED", {
+  text <- paste(readLines(
+    testthat::test_path("../..", "scripts", "export_tca_beds.R"),
+    warn = FALSE
+  ), collapse = "\n")
+  testthat::expect_match(text, '"--expression"', fixed = TRUE)
+  testthat::expect_match(text, "read_expression_bed(options$expression)", fixed = TRUE)
 })
 
 testthat::test_that("tensor validation rejects group and identifier mismatches", {

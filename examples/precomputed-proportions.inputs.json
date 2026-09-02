@@ -2,11 +2,9 @@
   "cell_type_deconvolution.expression": "gs://YOUR_BUCKET/input/whole_blood.bed.gz",
   "cell_type_deconvolution.gtf": "gs://YOUR_BUCKET/reference/annotation.gtf.gz",
   "cell_type_deconvolution.precomputed_proportions": "gs://YOUR_BUCKET/input/lm22_proportions.tsv",
-  "cell_type_deconvolution.docker_image": "ghcr.io/aou-multiomics-analysis/celltypedeconvolution@sha256:REPLACE_WITH_64_LOWERCASE_HEX_DIGEST",
-  "cell_type_deconvolution.pipeline_version": "0.1.0",
   "cell_type_deconvolution.export_cpu": 8,
   "cell_type_deconvolution.export_memory": "128 GB",
   "cell_type_deconvolution.export_disk_gb": 500,
-  "cell_type_deconvolution.export_preemptible_attempts": 0,
-  "cell_type_deconvolution.export_max_retries": 1
+  "cell_type_deconvolution.preemptible_attempts": 2,
+  "cell_type_deconvolution.max_retries": 2
 }

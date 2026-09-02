@@ -27,12 +27,24 @@ testthat::test_that("both examples use BED and GTF workflow inputs", {
     testthat::expect_false(any(paste0(
       "cell_type_deconvolution.", removed_parameters
     ) %in% names(inputs)))
-    image <- inputs[["cell_type_deconvolution.docker_image"]]
-    testthat::expect_match(
-      image,
-      "@sha256:REPLACE_WITH_64_LOWERCASE_HEX_DIGEST$"
+    testthat::expect_false(
+      "cell_type_deconvolution.docker_image" %in% names(inputs)
     )
-    testthat::expect_false(grepl(":latest", image, fixed = TRUE))
+    testthat::expect_false(
+      "cell_type_deconvolution.pipeline_version" %in% names(inputs)
+    )
+    testthat::expect_true(all(c(
+      "cell_type_deconvolution.preemptible_attempts",
+      "cell_type_deconvolution.max_retries"
+    ) %in% names(inputs)))
+    task_retry_inputs <- paste0(
+      "cell_type_deconvolution.",
+      rep(c("prepare", "dtangle", "proportions", "fit", "export", "manifest"),
+        each = 2L
+      ),
+      rep(c("_preemptible_attempts", "_max_retries"), times = 6L)
+    )
+    testthat::expect_false(any(task_retry_inputs %in% names(inputs)))
   })
 })
 
@@ -76,8 +88,10 @@ testthat::test_that("Terra guidance gives the input scale and LM22 contract", {
   testthat::expect_match(text, "log2\\(CPM\\)")
   testthat::expect_match(text, "strictly positive")
   testthat::expect_false(grepl("expression_type|log2_tpm", text))
-  testthat::expect_match(text, "64 lowercase hexadecimal")
-  testthat::expect_match(text, "celltype-deconvolution:test.*only")
+  testthat::expect_match(text, "latest.*default|default.*latest")
+  testthat::expect_match(text, "global.*preemptible|preemptible.*global")
+  testthat::expect_match(text, "does not have an expression-preparation task")
+  testthat::expect_match(text, "every valid nonconstant gene")
 })
 
 testthat::test_that("active dependencies and guides use direct BED outputs", {

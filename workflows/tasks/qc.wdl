@@ -42,7 +42,7 @@ task AssembleTca {
       --log-file outputs/assemble_tca_outputs.log 2>&1 | tee -a "$log"
     printf 'stage=%s dimensions=%s outputs=%s completion_time=%s\n' \
       "$stage" "$(wc -l < outputs/assembled_outputs.tsv)" \
-      "group_hdf5,group_tsv,reconstruction_by_sample,assembly_qc" \
+      "group_hdf5,group_tsv,reconstruction_by_sample,assembly_qc,output_inventory,qc_plots" \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
   >>>
 
@@ -51,6 +51,8 @@ task AssembleTca {
     Array[File] group_tsv = glob("outputs/*.tsv.gz")
     File reconstruction_by_sample = "outputs/reconstruction_by_sample.tsv"
     File assembly_qc = "outputs/qc_summary.tsv"
+    File output_inventory = "outputs/assembled_outputs.tsv"
+    File qc_plots = "outputs/qc_plots.pdf"
     File log = "assemble_tca.log"
   }
 
@@ -101,10 +103,98 @@ task BuildManifest {
     status=0
     printf 'stage=%s start_time=%s\n' "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
     trap 'status=$?; printf "stage=%s error_status=%s time=%s\\n" "$stage" "$status" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"; exit "$status"' ERR
+    localized_group_files="$PWD/localized_group_files"
+    rewritten_inventory=outputs/assembled_outputs.localized.tsv
+    mkdir -p "$localized_group_files"
+    stage_localized_file() {
+      source_path="$1"
+      source_name="$(basename -- "$source_path")"
+      if [[ -z "$source_name" || "$source_name" == "." || "$source_name" == ".." ]]; then
+        printf 'stage=%s error_status=1 time=%s message=unsafe_output_basename\n' \
+          "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
+        exit 1
+      fi
+      source_dir="$(dirname -- "$source_path")"
+      source_absolute="$(cd -P -- "$source_dir" && pwd -P)/$source_name"
+      destination="$localized_group_files/$source_name"
+      if [[ ! -e "$source_absolute" ]]; then
+        printf 'stage=%s error_status=1 time=%s message=missing_source_output\n' \
+          "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
+        exit 1
+      fi
+      if [[ -e "$destination" || -L "$destination" ]]; then
+        printf 'stage=%s error_status=1 time=%s message=duplicate_output_basename\n' \
+          "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
+        exit 1
+      fi
+      ln -s "$source_absolute" "$destination"
+      if [[ ! -e "$destination" ]]; then
+        printf 'stage=%s error_status=1 time=%s message=failed_to_stage_output\n' \
+          "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
+        exit 1
+      fi
+    }
+    cat > group_output_sources.txt <<'GROUP_OUTPUT_SOURCES'
+~{sep('\n', group_hdf5)}
+~{sep('\n', group_tsv)}
+GROUP_OUTPUT_SOURCES
+    while IFS= read -r source_path; do
+      [[ -z "$source_path" ]] && continue
+      stage_localized_file "$source_path"
+    done < group_output_sources.txt
+    awk -F '\t' -v OFS='\t' -v localized_dir="$localized_group_files" '
+      NR == 1 {
+        path_column = 0
+        for (column = 1; column <= NF; column++) {
+          if ($column == "path") {
+            path_column = column
+            break
+          }
+        }
+        if (path_column == 0) {
+          print "Missing path column in assembled output inventory" > "/dev/stderr"
+          exit 1
+        }
+        print
+        next
+      }
+      {
+        output_basename = $path_column
+        sub(/^.*\//, "", output_basename)
+        if (output_basename == "") {
+          print "Empty path in assembled output inventory" > "/dev/stderr"
+          exit 1
+        }
+        $path_column = localized_dir "/" output_basename
+        print
+      }
+    ' '~{output_inventory}' > "$rewritten_inventory"
+    awk -F '\t' '
+      NR == 1 {
+        path_column = 0
+        for (column = 1; column <= NF; column++) {
+          if ($column == "path") {
+            path_column = column
+            break
+          }
+        }
+        if (path_column == 0) {
+          print "Missing path column in localized output inventory" > "/dev/stderr"
+          exit 1
+        }
+        next
+      }
+      { print $path_column }
+    ' "$rewritten_inventory" > rewritten_paths.txt
+    while IFS= read -r rewritten_path; do
+      if [[ ! -e "$rewritten_path" ]]; then
+        printf 'stage=%s error_status=1 time=%s message=missing_localized_output\n' \
+          "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
+        exit 1
+      fi
+    done < rewritten_paths.txt
     printf '%s\n' \
       '~{reconstruction_by_sample}' \
-      ~{sep(' ', group_hdf5)} \
-      ~{sep(' ', group_tsv)} \
       '~{model}' \
       '~{model_log}' \
       '~{mapping_report}' \
@@ -114,7 +204,7 @@ task BuildManifest {
       '~{tca_weights}' \
       '~{filter_report}' > supporting_inputs.txt
     Rscript /opt/celltype/scripts/build_manifest.R \
-      --outputs '~{output_inventory}' \
+      --outputs "$rewritten_inventory" \
       --pipeline-version '~{pipeline_version}' \
       --tca-version '~{tca_version}' \
       ~{parameters_argument} \
@@ -122,7 +212,7 @@ task BuildManifest {
       --output outputs/output_manifest.json \
       --log-file outputs/output_manifest.log 2>&1 | tee -a "$log"
     printf 'stage=%s dimensions=%s outputs=%s completion_time=%s\n' \
-      "$stage" "$(wc -l < supporting_inputs.txt)" \
+      "$stage" "$(wc -l < "$rewritten_inventory")" \
       "output_manifest,qc_summary,qc_plots,provenance" \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
   >>>
@@ -131,7 +221,7 @@ task BuildManifest {
     File output_manifest = "outputs/output_manifest.json"
     File qc_summary = assembly_qc_summary
     File qc_plots = assembly_qc_plots
-    File provenance = output_inventory
+    File provenance = "outputs/assembled_outputs.localized.tsv"
     File log = "build_manifest.log"
   }
 

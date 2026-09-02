@@ -25,3 +25,23 @@ testthat::test_that("Terra guidance gives the input scale and LM22 contract", {
   testthat::expect_match(text, "strictly positive")
   testthat::expect_false(grepl("expression_type|log2_tpm", text))
 })
+
+testthat::test_that("HDF5 guidance names gene_name output datasets", {
+  readme <- paste(
+    readLines(testthat::test_path("../..", "README.md")),
+    collapse = "\n"
+  )
+  terra <- paste(
+    readLines(testthat::test_path("../..", "docs", "terra.md")),
+    collapse = "\n"
+  )
+  dictionary <- paste(
+    readLines(testthat::test_path("../..", "docs", "data-dictionary.md")),
+    collapse = "\n"
+  )
+
+  testthat::expect_match(readme, "- `gene_name`: gene names in matrix order\\.")
+  testthat::expect_match(terra, "contains `gene_name` and `sample_id` datasets")
+  testthat::expect_match(dictionary, "stores `gene_name` and `sample_id` in the same order")
+  testthat::expect_match(dictionary, "Gene-name lists for tensor extraction")
+})

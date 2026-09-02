@@ -84,7 +84,7 @@ All names below use the exact `cell_type_deconvolution` workflow namespace. The 
 | `tca_expression` | `File` | Both | N/A | `log2(CPM)` | Mapped non-constant genes only; gene and sample order is stable | Full mapped matrix after constant-gene removal. It is not LM22-limited. |
 | `tca_excluded_genes` | `File` | Both | N/A | N/A | Contains constant-gene removal reasons | Genes excluded before TCA fitting. |
 | `gene_shard_manifest` | `File` | Both | N/A | N/A | Deterministic stable shard order | Gene-to-shard mapping. |
-| `gene_shards` | `Array[File]` | Both | N/A | N/A | Each listed shard exists | Gene ID lists for tensor extraction. |
+| `gene_shards` | `Array[File]` | Both | N/A | N/A | Each listed shard exists | Gene-name lists for tensor extraction. |
 | `fit_tca_log` | `File` | Both | N/A | N/A | Task command log exists | TCA-fit stage log. |
 | `tensor_shards` | `Array[File]` | Both | N/A | `log2_cpm` | Each shard HDF5 contains the assigned genes | Intermediate TCA tensor HDF5 files. |
 | `tensor_shard_logs` | `Array[File]` | Both | N/A | N/A | One task log per tensor shard | Tensor-extraction logs. |
@@ -102,4 +102,4 @@ All names below use the exact `cell_type_deconvolution` workflow namespace. The 
 
 ## HDF5 contract
 
-Every file in `group_hdf5` stores `expression` with genes in rows and samples in columns. It stores `gene_id` and `sample_id` in the same order. Attributes record the cell-group name, `log2_cpm`, the pipeline version, and the TCA version. `tensor_shards` use the same log-scale expression convention, but they are intermediate shard files.
+Every file in `group_hdf5` stores `expression` with genes in rows and samples in columns. It stores `gene_name` and `sample_id` in the same order. Attributes record the cell-group name, `log2_cpm`, the pipeline version, and the TCA version. `tensor_shards` use the same log-scale expression convention, but they are intermediate shard files.

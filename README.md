@@ -37,7 +37,7 @@ The primary outputs are the original 22-type proportions, combined proportions, 
 Each group HDF5 file contains:
 
 - `expression`: genes in rows and samples in columns.
-- `gene_id`: gene identifiers in matrix order.
+- `gene_name`: gene names in matrix order.
 - `sample_id`: sample identifiers in matrix order.
 - attributes for the cell-group name, `log2_cpm` scale, pipeline version, and model version.
 

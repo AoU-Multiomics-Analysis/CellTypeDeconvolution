@@ -45,7 +45,7 @@ TCA fits one cohort-wide model with `refit_W = FALSE`. It uses the full mapped `
 
 The default resources support an initial whole-blood run of about 9,000 samples. The TCA fitting task defaults to 16 CPU, 192 GB memory, and 750 GB disk. The assembly task defaults to 8 CPU, 128 GB memory, and 500 GB disk. The default TCA shard size is 500 genes. Adjust runtime inputs only after you inspect your cohort size and storage requirements.
 
-Each retained group has one HDF5 matrix. The `expression` dataset has genes in rows and samples in columns. The file also contains `gene_id` and `sample_id` datasets. Attributes record the cell-group name, the `log2_cpm` scale, the pipeline version, and the TCA version. These matrices contain inferred log-expression estimates. They are not counts, linear CPM, or absolute expression values. Set `write_tsv` to `true` only when compressed TSV copies are required.
+Each retained group has one HDF5 matrix. The `expression` dataset has genes in rows and samples in columns. The file also contains `gene_name` and `sample_id` datasets. Attributes record the cell-group name, the `log2_cpm` scale, the pipeline version, and the TCA version. These matrices contain inferred log-expression estimates. They are not counts, linear CPM, or absolute expression values. Set `write_tsv` to `true` only when compressed TSV copies are required.
 
 The workflow also writes proportions, filtering reports, the fitted TCA model, gene-shard records, reconstruction quality control, logs, an output inventory, and a machine-readable manifest. See [the data dictionary](data-dictionary.md) for exact names.
 

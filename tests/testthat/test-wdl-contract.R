@@ -1,9 +1,28 @@
+source(testthat::test_path("../..", "R", "expression.R"), local = TRUE)
+
 wdl_text <- function(path) {
   paste(
     readLines(testthat::test_path("../..", path), warn = FALSE),
     collapse = "\n"
   )
 }
+
+testthat::test_that("smoke fixture is BED and contains a duplicate gene symbol", {
+  bed <- readr::read_tsv(
+    testthat::test_path("..", "fixtures", "synthetic_expression.bed"),
+    show_col_types = FALSE,
+    progress = FALSE
+  )
+  testthat::expect_identical(
+    names(bed)[1:4],
+    c("#chr", "start", "end", "gene_id")
+  )
+  gtf <- read_gtf_gene_annotation(
+    testthat::test_path("..", "fixtures", "synthetic.gtf")
+  )
+  mapped <- gtf$gene_name[match(bed$gene_id, gtf$gene_id)]
+  testthat::expect_true(anyDuplicated(mapped) > 0L)
+})
 
 expect_task_contract <- function(path, task, inputs, outputs, defaults) {
   text <- wdl_text(path)
@@ -113,9 +132,10 @@ testthat::test_that("synthetic smoke fixtures are deterministic and restart with
   testthat::expect_identical(second_status, 0L)
 
   expected_files <- c(
-    "synthetic_cpm.tsv", "synthetic.gtf", "synthetic_signature.tsv",
+    "synthetic_expression.bed", "synthetic.gtf", "synthetic_signature.tsv",
     "batch_indicator.tsv", "precomputed_proportions.tsv",
-    "expected_samples.txt", "expected_genes.txt", "expected_groups.txt",
+    "expected_samples.txt", "expected_gene_ids.txt", "expected_coordinates.tsv",
+    "expected_groups.txt",
     "dtangle.inputs.json", "restart.inputs.json"
   )
   first_hashes <- tools::md5sum(file.path(first, expected_files))
@@ -123,21 +143,36 @@ testthat::test_that("synthetic smoke fixtures are deterministic and restart with
   testthat::expect_false(anyNA(first_hashes))
   testthat::expect_identical(unname(first_hashes), unname(second_hashes))
 
-  cpm <- readr::read_tsv(
-    file.path(first, "synthetic_cpm.tsv"),
-    show_col_types = FALSE
+  bed <- readr::read_tsv(
+    file.path(first, "synthetic_expression.bed"),
+    show_col_types = FALSE,
+    progress = FALSE
   )
   signature <- readr::read_tsv(
     file.path(first, "synthetic_signature.tsv"),
     show_col_types = FALSE
   )
-  testthat::expect_identical(dim(cpm), c(72L, 13L))
-  testthat::expect_true(all(as.matrix(cpm[-1L]) > 0))
+  values <- as.matrix(bed[-(1:4)])
+  testthat::expect_identical(names(bed)[1:4], c("#chr", "start", "end", "gene_id"))
+  testthat::expect_identical(dim(bed), c(73L, 16L))
+  testthat::expect_true(all(values > 0))
   testthat::expect_lt(
-    max(abs(colSums(as.matrix(cpm[-1L])) - 1e6)),
+    max(abs(colSums(values) - 1e6)),
     1e-6
   )
   testthat::expect_identical(dim(signature), c(66L, 23L))
+  expected_gene_ids <- readLines(
+    file.path(first, "expected_gene_ids.txt"),
+    warn = FALSE
+  )
+  expected_coordinates <- readr::read_tsv(
+    file.path(first, "expected_coordinates.tsv"),
+    show_col_types = FALSE,
+    progress = FALSE
+  ) |>
+    tibble::as_tibble()
+  testthat::expect_identical(bed$gene_id, expected_gene_ids)
+  testthat::expect_identical(bed[1:4], expected_coordinates)
 
   gtf <- readLines(file.path(first, "synthetic.gtf"), warn = FALSE)
   testthat::expect_true(any(grepl('gene_type "protein_coding"', gtf)))
@@ -161,6 +196,33 @@ testthat::test_that("synthetic smoke fixtures are deterministic and restart with
     restart$cell_type_deconvolution.precomputed_proportions,
     "tests/fixtures/precomputed_proportions.tsv"
   )
+  expected_expression <- "tests/fixtures/synthetic_expression.bed"
+  testthat::expect_identical(
+    dtangle$cell_type_deconvolution.expression,
+    expected_expression
+  )
+  testthat::expect_identical(
+    restart$cell_type_deconvolution.expression,
+    expected_expression
+  )
+  purrr::walk(c("export_cpu", "export_memory", "export_disk_gb",
+    "export_preemptible_attempts", "export_max_retries"), function(name) {
+    input_name <- paste0("cell_type_deconvolution.", name)
+    testthat::expect_true(input_name %in% names(dtangle))
+    testthat::expect_true(input_name %in% names(restart))
+  })
+  purrr::walk(c("shard", "hdf5", "tsv", "extract", "assemble"), function(term) {
+    testthat::expect_false(any(grepl(
+      term,
+      names(dtangle),
+      ignore.case = TRUE
+    )))
+    testthat::expect_false(any(grepl(
+      term,
+      names(restart),
+      ignore.case = TRUE
+    )))
+  })
 })
 
 testthat::test_that("all modular WDL tasks declare CLI-aligned interfaces", {

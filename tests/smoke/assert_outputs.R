@@ -56,9 +56,20 @@ expected_samples <- readLines(
   file.path(fixture_directory, "expected_samples.txt"),
   warn = FALSE
 )
-expected_full_mapped_genes <- readLines(
-  file.path(fixture_directory, "expected_genes.txt"),
+expected_gene_ids <- readLines(
+  file.path(fixture_directory, "expected_gene_ids.txt"),
   warn = FALSE
+)
+expected_coordinates <- readr::read_tsv(
+  file.path(fixture_directory, "expected_coordinates.tsv"),
+  col_types = readr::cols(
+    `#chr` = readr::col_character(),
+    start = readr::col_integer(),
+    end = readr::col_integer(),
+    gene_id = readr::col_character()
+  ),
+  show_col_types = FALSE,
+  progress = FALSE
 )
 expected_groups <- readLines(
   file.path(fixture_directory, "expected_groups.txt"),
@@ -83,7 +94,14 @@ tca_expression <- read_matrix_table("tca_expression", "gene_id")
 observed_genes <- rownames(tca_expression)
 observed_samples <- colnames(tca_expression)
 stopifnot(identical(expected_samples, observed_samples))
-stopifnot(identical(expected_full_mapped_genes, observed_genes))
+stopifnot(identical(expected_gene_ids, observed_genes))
+stopifnot(all(c("ENSGSYN000001", "ENSGDUP000001") %in% observed_genes))
+stopifnot(any(grepl("^ENSGEXTRA", observed_genes)))
+
+if (identical(expected_proportion_mode, "dtangle")) {
+  shared_bulk <- read_matrix_table("dtangle_shared_bulk", "gene_symbol")
+  stopifnot(sum(rownames(shared_bulk) == "SYN_GENE_001") == 1L)
+}
 
 reconstruction <- readr::read_tsv(
   output_value("reconstruction_by_sample"),
@@ -91,14 +109,14 @@ reconstruction <- readr::read_tsv(
   progress = FALSE
 )
 stopifnot(identical(expected_samples, reconstruction$sample_id))
-stopifnot(all(reconstruction$gene_count == length(expected_full_mapped_genes)))
+stopifnot(all(reconstruction$gene_count == length(expected_gene_ids)))
 stopifnot(all(is.finite(reconstruction$correlation)))
 stopifnot(all(is.finite(reconstruction$rmse)))
 
 cell_type_beds <- output_value("cell_type_beds")
 stopifnot(length(cell_type_beds) == length(expected_groups))
 purrr::walk(cell_type_beds, function(path) {
-  table <- readr::read_tsv(
+  bed <- readr::read_tsv(
     path,
     col_types = readr::cols(.default = readr::col_character()),
     name_repair = "minimal",
@@ -106,9 +124,17 @@ purrr::walk(cell_type_beds, function(path) {
     progress = FALSE
   )
   stopifnot(
-    identical(table$gene_id, expected_full_mapped_genes),
-    identical(names(table)[-(1:4)], expected_samples)
+    identical(names(bed)[1:4], c("#chr", "start", "end", "gene_id")),
+    identical(bed$gene_id, expected_gene_ids),
+    identical(names(bed)[-(1:4)], expected_samples),
+    identical(bed[["#chr"]], expected_coordinates[["#chr"]]),
+    identical(readr::parse_integer(bed$start), expected_coordinates$start),
+    identical(readr::parse_integer(bed$end), expected_coordinates$end)
   )
+  values <- bed[-(1:4)] |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), readr::parse_double)) |>
+    as.matrix()
+  stopifnot(all(is.finite(values)))
 })
 
 inventory <- readr::read_tsv(
@@ -118,10 +144,13 @@ inventory <- readr::read_tsv(
 )
 stopifnot(
   nrow(inventory) == length(expected_groups),
-  all(inventory$n_genes == length(expected_full_mapped_genes)),
+  all(inventory$n_genes == length(expected_gene_ids)),
   all(inventory$n_samples == length(expected_samples)),
   all(inventory$scale == "log2_cpm"),
-  setequal(inventory$cell_group, expected_groups)
+  setequal(inventory$cell_group, expected_groups),
+  all(nzchar(inventory$slug)),
+  anyDuplicated(inventory$slug) == 0L,
+  setequal(normalizePath(cell_type_beds), normalizePath(inventory$path))
 )
 
 manifest <- jsonlite::read_json(
@@ -158,7 +187,7 @@ purrr::walk(manifest_outputs, function(entry) {
   stopifnot(
     identical(entry$scale, "log2_cpm"),
     identical(unlist(entry$dimensions, use.names = FALSE), c(
-      length(expected_full_mapped_genes),
+      length(expected_gene_ids),
       length(expected_samples)
     )),
     entry$cell_group %in% expected_groups
@@ -184,7 +213,7 @@ message(sprintf(
     "Smoke assertions passed: %d genes, %d samples, %d groups, ",
     "scale=log2_cpm"
   ),
-  length(expected_full_mapped_genes),
+  length(expected_gene_ids),
   length(expected_samples),
   length(expected_groups)
 ))

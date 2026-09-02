@@ -61,7 +61,20 @@ extra_gene_expression <- matrix(
   ncol = length(sample_ids),
   dimnames = list(extra_gene_names, sample_ids)
 )
-bulk_linear <- rbind(signature %*% t(weights), extra_gene_expression)
+duplicate_gene_id <- "ENSGDUP000001"
+duplicate_gene_name <- signature_gene_names[[1L]]
+duplicate_linear <- matrix(
+  stats::runif(length(sample_ids), min = 0.75, max = 3.25),
+  nrow = 1L,
+  dimnames = list(duplicate_gene_name, sample_ids)
+)
+bulk_linear <- rbind(
+  signature %*% t(weights),
+  extra_gene_expression,
+  duplicate_linear
+)
+all_gene_ids <- c(signature_gene_ids, extra_gene_ids, duplicate_gene_id)
+all_gene_names <- c(signature_gene_names, extra_gene_names, duplicate_gene_name)
 bulk_cpm <- sweep(bulk_linear, 2L, colSums(bulk_linear), "/") * 1e6
 stopifnot(
   all(bulk_cpm > 0),
@@ -76,11 +89,20 @@ write_matrix <- function(matrix_value, path, id_column) {
 }
 
 expression_cpm <- bulk_cpm
-rownames(expression_cpm) <- c(signature_gene_ids, extra_gene_ids)
-write_matrix(
-  expression_cpm,
-  file.path(output_directory, "synthetic_cpm.tsv"),
-  "gene_id"
+rownames(expression_cpm) <- all_gene_ids
+coordinates <- tibble::tibble(
+  `#chr` = rep(c("chr1", "chr2"), length.out = nrow(expression_cpm)),
+  start = as.integer((seq_len(nrow(expression_cpm)) - 1L) * 1000L),
+  end = as.integer((seq_len(nrow(expression_cpm)) - 1L) * 1000L + 500L),
+  gene_id = rownames(expression_cpm)
+)
+expression_bed <- dplyr::bind_cols(
+  coordinates,
+  tibble::as_tibble(expression_cpm, .name_repair = "minimal")
+)
+readr::write_tsv(
+  expression_bed,
+  file.path(output_directory, "synthetic_expression.bed")
 )
 write_matrix(
   signature,
@@ -103,8 +125,6 @@ readr::write_tsv(
   na = ""
 )
 
-all_gene_ids <- c(signature_gene_ids, extra_gene_ids)
-all_gene_names <- c(signature_gene_names, extra_gene_names)
 gene_types <- ifelse(
   seq_along(all_gene_ids) %% 5L == 0L,
   "lncRNA",
@@ -115,11 +135,11 @@ gtf_lines <- purrr::pmap_chr(
     gene_id = all_gene_ids,
     gene_name = all_gene_names,
     gene_type = gene_types,
-    index = seq_along(all_gene_ids)
+    chromosome = coordinates[["#chr"]],
+    start = coordinates$start + 1L,
+    end = coordinates$end
   ),
-  function(gene_id, gene_name, gene_type, index) {
-    start <- index * 1000L
-    end <- start + 499L
+  function(gene_id, gene_name, gene_type, chromosome, start, end) {
     attributes <- sprintf(
       'gene_id "%s"; gene_name "%s"; gene_type "%s";',
       gene_id,
@@ -127,7 +147,7 @@ gtf_lines <- purrr::pmap_chr(
       gene_type
     )
     paste(
-      "chr1", "synthetic", "gene", start, end, ".", "+", ".",
+      chromosome, "synthetic", "gene", start, end, ".", "+", ".",
       attributes,
       sep = "\t"
     )
@@ -136,11 +156,15 @@ gtf_lines <- purrr::pmap_chr(
 writeLines(gtf_lines, file.path(output_directory, "synthetic.gtf"))
 
 writeLines(sample_ids, file.path(output_directory, "expected_samples.txt"))
-writeLines(all_gene_ids, file.path(output_directory, "expected_genes.txt"))
+writeLines(all_gene_ids, file.path(output_directory, "expected_gene_ids.txt"))
+readr::write_tsv(
+  coordinates,
+  file.path(output_directory, "expected_coordinates.tsv")
+)
 writeLines(cell_groups, file.path(output_directory, "expected_groups.txt"))
 
 common_inputs <- list(
-  "cell_type_deconvolution.expression" = "tests/fixtures/synthetic_cpm.tsv",
+  "cell_type_deconvolution.expression" = "tests/fixtures/synthetic_expression.bed",
   "cell_type_deconvolution.gtf" = "tests/fixtures/synthetic.gtf",
   "cell_type_deconvolution.covariates" = "tests/fixtures/batch_indicator.tsv",
   "cell_type_deconvolution.docker_image" = "celltype-deconvolution:test",

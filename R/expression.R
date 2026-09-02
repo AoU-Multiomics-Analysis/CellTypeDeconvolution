@@ -188,6 +188,31 @@ make_cpm_mapping_report <- function(cpm, annotation) {
   )
 }
 
+make_tca_expression <- function(expression) {
+  if (!is.list(expression) || !all(c("coordinates", "cpm") %in% names(expression))) {
+    stop("expression must contain coordinates and cpm", call. = FALSE)
+  }
+  cpm <- validate_cpm_matrix(expression$cpm)
+  if (!identical(rownames(cpm), expression$coordinates$gene_id)) {
+    stop("Expression genes and BED coordinates must match exactly", call. = FALSE)
+  }
+  log2(cpm)
+}
+
+make_dtangle_expression <- function(expression, annotation) {
+  if (!is.list(expression) || !all(c("coordinates", "cpm") %in% names(expression))) {
+    stop("expression must contain coordinates and cpm", call. = FALSE)
+  }
+  cpm <- validate_cpm_matrix(expression$cpm)
+  annotation <- validate_gtf_gene_annotation(annotation)
+  mapping_report <- make_cpm_mapping_report(cpm, annotation)
+  symbol_cpm <- collapse_cpm_to_gene_names(cpm, annotation)
+  if (nrow(symbol_cpm) == 0L || any(symbol_cpm <= 0)) {
+    stop("No positive CPM genes map to a usable gene symbol", call. = FALSE)
+  }
+  list(log_expression = log2(symbol_cpm), mapping_report = mapping_report)
+}
+
 make_excluded_genes <- function(mapping_report) {
   mapping_report |>
     dplyr::filter(!(.data$mapping_action %in% c(

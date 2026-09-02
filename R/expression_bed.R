@@ -40,7 +40,7 @@ read_expression_bed <- function(path) {
     dplyr::select(dplyr::all_of(sample_ids)) |>
     dplyr::mutate(dplyr::across(
       dplyr::everything(),
-      ~ readr::parse_double(.x, na = character())
+      ~ suppressWarnings(readr::parse_double(.x, na = character()))
     )) |>
     as.matrix()
   rownames(cpm) <- coordinates$gene_id

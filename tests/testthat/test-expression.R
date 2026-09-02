@@ -65,6 +65,36 @@ testthat::test_that("duplicate aggregation preserves first gene-symbol order and
   )
 })
 
+testthat::test_that("direct CPM views separate TCA genes from dtangle symbols", {
+  expression <- list(
+    coordinates = tibble::tibble(
+      `#chr` = c("chr1", "chr1", "chr2"),
+      start = c(10L, 20L, 30L),
+      end = c(11L, 21L, 31L),
+      gene_id = c("ENSG1", "ENSG2", "ENSG3")
+    ),
+    cpm = matrix(
+      c(4, 8, 16, 32, 64, 128),
+      nrow = 3,
+      byrow = TRUE,
+      dimnames = list(c("ENSG1", "ENSG2", "ENSG3"), c("S1", "S2"))
+    )
+  )
+  annotation <- tibble::tibble(
+    gene_id = c("ENSG1", "ENSG2"),
+    gene_name = c("MARKER", "MARKER"),
+    gene_type = c("protein_coding", "lncRNA")
+  )
+
+  tca_expression <- make_tca_expression(expression)
+  dtangle_expression <- make_dtangle_expression(expression, annotation)
+
+  testthat::expect_identical(rownames(tca_expression), c("ENSG1", "ENSG2", "ENSG3"))
+  testthat::expect_equal(unname(tca_expression[, "S1"]), log2(c(4, 16, 64)))
+  testthat::expect_identical(rownames(dtangle_expression$log_expression), "MARKER")
+  testthat::expect_equal(unname(dtangle_expression$log_expression[1, ]), log2(c(20, 40)))
+})
+
 testthat::test_that("duplicate aggregation does not pivot the full expression matrix", {
   cpm <- matrix(
     c(1, 2, 3, 4),
@@ -123,6 +153,24 @@ testthat::test_that("BED validation rejects invalid coordinates and duplicate ID
   path <- tempfile(fileext = ".bed")
   readr::write_tsv(invalid, path)
   testthat::expect_error(read_expression_bed(path), "start.*less than.*end")
+})
+
+testthat::test_that("BED validation rejects non-positive, missing, and nonfinite CPM values", {
+  invalid_values <- c("0", "-1", "", "Inf")
+
+  for (invalid_value in invalid_values) {
+    path <- tempfile(fileext = ".bed")
+    readr::write_tsv(
+      tibble::tibble(
+        `#chr` = "chr1", start = 0L, end = 10L, gene_id = "g1",
+        S1 = invalid_value
+      ),
+      path,
+      na = ""
+    )
+
+    testthat::expect_error(read_expression_bed(path), "CPM values")
+  }
 })
 
 testthat::test_that("prepared CPM must be strictly positive", {

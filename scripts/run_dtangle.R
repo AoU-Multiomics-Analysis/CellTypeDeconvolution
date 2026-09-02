@@ -15,6 +15,16 @@ run_dtangle_stage <- function() {
       help = "Gene-by-sample log2(CPM) matrix TSV with gene_name first column."
     ),
     optparse::make_option(
+      "--expression",
+      type = "character",
+      help = "Coordinate-preserving BED of positive linear CPM values."
+    ),
+    optparse::make_option(
+      "--gtf",
+      type = "character",
+      help = "GTF used to map expression gene_id values to LM22 gene symbols."
+    ),
+    optparse::make_option(
       "--lm22",
       type = "character",
       help = "Standard positive linear LM22 matrix TSV with gene_symbol first column."
@@ -55,10 +65,35 @@ run_dtangle_stage <- function() {
     )
   )
   options <- optparse::parse_args(optparse::OptionParser(option_list = option_list))
-  required_options <- c("bulk_log", "lm22", "output_dir")
+  has_option_value <- function(value) {
+    !is.null(value) && length(value) == 1L && !is.na(value) && nzchar(value)
+  }
+  has_bulk_log <- has_option_value(options$bulk_log)
+  has_expression <- has_option_value(options$expression)
+  has_gtf <- has_option_value(options$gtf)
+  if (has_bulk_log && (has_expression || has_gtf)) {
+    stop(
+      "Provide either --bulk-log alone or --expression plus --gtf, not both input modes.",
+      call. = FALSE
+    )
+  }
+  if (!has_bulk_log && xor(has_expression, has_gtf)) {
+    stop(
+      "Direct CPM input requires both --expression and --gtf.",
+      call. = FALSE
+    )
+  }
+  if (!has_bulk_log && !has_expression && !has_gtf) {
+    stop(
+      "Provide either --bulk-log alone or --expression plus --gtf.",
+      call. = FALSE
+    )
+  }
+
+  required_options <- c("lm22", "output_dir")
   missing_options <- required_options[vapply(
     options[required_options],
-    function(value) is.null(value) || !nzchar(value),
+    function(value) !has_option_value(value),
     logical(1)
   )]
   if (length(missing_options) > 0L) {
@@ -69,7 +104,14 @@ run_dtangle_stage <- function() {
   }
 
   message(sprintf("stage=dtangle utc_start=%s", utc_time()))
-  bulk_log <- read_numeric_matrix(options$bulk_log, "gene_name")
+  if (has_bulk_log) {
+    bulk_log <- read_numeric_matrix(options$bulk_log, "gene_name")
+  } else {
+    expression <- read_expression_bed(options$expression)
+    annotation <- read_gtf_gene_annotation(options$gtf)
+    dtangle_expression <- make_dtangle_expression(expression, annotation)
+    bulk_log <- dtangle_expression$log_expression
+  }
   lm22_linear <- read_numeric_matrix(options$lm22, "gene_symbol")
   message(sprintf(
     "stage=dtangle bulk_dimensions=genes:%d samples:%d lm22_dimensions=genes:%d cell_types:%d",

@@ -319,20 +319,13 @@ build_pipeline_qc_summary <- function(
     filter_report,
     tca_model,
     tca_log_lines,
-    dtangle_metadata = NULL,
-    mapping_report = NULL) {
+    dtangle_metadata = NULL) {
   if (!inherits(export_summary, "data.frame") ||
       !all(c("metric", "value") %in% names(export_summary)) ||
       nrow(export_summary) == 0L || anyNA(export_summary$metric) ||
       any(!nzchar(export_summary$metric)) ||
       anyDuplicated(export_summary$metric) > 0L) {
     stop("export_summary must contain unique metric and value columns", call. = FALSE)
-  }
-  if (!is.null(mapping_report) &&
-      (!inherits(mapping_report, "data.frame") ||
-        !all(c("gene_id", "gene_name", "mapping_action") %in%
-          names(mapping_report)))) {
-    stop("mapping_report is missing required mapping columns", call. = FALSE)
   }
   matrices <- list(
     original_proportions = original_proportions,
@@ -378,25 +371,6 @@ build_pipeline_qc_summary <- function(
     stop("TCA model must contain one finite tau_hat value", call. = FALSE)
   }
   convergence <- parse_tca_convergence(tca_log_lines)
-  mapping_summary <- if (is.null(mapping_report)) {
-    tibble::tibble()
-  } else {
-    duplicate_action <-
-      mapping_report$mapping_action ==
-      "duplicate_gene_name_aggregated_for_dtangle"
-    duplicate_gene_names <- unique(mapping_report$gene_name[
-      duplicate_action & !is.na(mapping_report$gene_name) &
-        nzchar(mapping_report$gene_name)
-    ])
-    tibble::tibble(
-      metric = c(
-        "duplicate_gene_symbol_input_row_count",
-        "duplicate_gene_symbol_count"
-      ),
-      value = c(sum(duplicate_action), length(duplicate_gene_names)),
-      status = "passed"
-    )
-  }
   base_summary <- tibble::as_tibble(export_summary) |>
     dplyr::transmute(
       metric = as.character(.data$metric),
@@ -431,11 +405,6 @@ build_pipeline_qc_summary <- function(
       convergence$status,
       "fitted"
     )
-  )
-  proportion_summary <- dplyr::bind_rows(
-    dplyr::slice(proportion_summary, 1L:5L),
-    mapping_summary,
-    dplyr::slice(proportion_summary, 6L:nrow(proportion_summary))
   )
   lm22_status <- if (is.null(dtangle_metadata)) {
     tibble::tibble(
@@ -548,8 +517,7 @@ build_output_manifest <- function(
     outputs,
     tca_version,
     parameters,
-    container_image,
-    pipeline_version = NULL) {
+    container_image) {
   outputs <- validate_manifest_outputs(outputs)
   if (!requireNamespace("digest", quietly = TRUE)) {
     stop("The digest package is required for SHA-256 checksums", call. = FALSE)
@@ -580,7 +548,7 @@ build_output_manifest <- function(
       cell_group = as.character(cell_group)
     )
   })
-  manifest <- list(
+  list(
     schema_version = "1.0",
     created_utc = format(
       Sys.time(),
@@ -596,11 +564,6 @@ build_output_manifest <- function(
     container_image = container_image,
     outputs = output_entries
   )
-  if (is.character(pipeline_version) && length(pipeline_version) == 1L &&
-      !is.na(pipeline_version) && nzchar(pipeline_version)) {
-    manifest$pipeline_version <- pipeline_version
-  }
-  manifest
 }
 
 write_output_manifest <- function(path, manifest) {

@@ -32,7 +32,7 @@ testthat::test_that("BuildManifest keeps localized paths internal", {
   purrr::walk(c(
     "localized_bed_files", "stage_localized_file()", "basename",
     "ln -s \"$source_absolute\" \"$destination\"",
-    "~{sep('\\n', cell_type_beds)}",
+    "~{sep='\\n' cell_type_beds}",
     "checksum_inventory=checksum_inventory.localized.tsv",
     "public_inventory=outputs/output_inventory.tsv",
     "--outputs \"$checksum_inventory\"",

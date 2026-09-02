@@ -189,42 +189,7 @@ testthat::test_that("reconstruction statistics combine genes by sample", {
   testthat::expect_true(all(is.finite(metrics$correlation)))
 })
 
-testthat::test_that("manifest records hashes, dimensions, and provenance", {
-  output_path <- tempfile(fileext = ".bed.gz")
-  writeBin(charToRaw("bed-output"), output_path)
-  outputs <- tibble::tibble(
-    logical_name = "cd4_t_cells_expression",
-    path = output_path,
-    n_genes = 2L,
-    n_samples = 3L,
-    scale = "log2_cpm",
-    cell_group = "CD4 T cells"
-  )
-
-  manifest <- build_output_manifest(
-    outputs = outputs,
-    pipeline_version = "test",
-    tca_version = "1.2.1",
-    parameters = list(scale = "log2_cpm"),
-    container_image = paste0(
-      "example.org/pipeline@sha256:",
-      paste(rep("a", 64L), collapse = "")
-    )
-  )
-
-  testthat::expect_identical(manifest$pipeline_version, "test")
-  testthat::expect_identical(manifest$tca_version, "1.2.1")
-  testthat::expect_identical(manifest$outputs[[1L]]$dimensions, c(2L, 3L))
-  testthat::expect_identical(manifest$outputs[[1L]]$path, basename(output_path))
-  testthat::expect_identical(manifest$outputs[[1L]]$file_name, basename(output_path))
-  testthat::expect_identical(
-    manifest$outputs[[1L]]$sha256,
-    digest::digest(file = output_path, algo = "sha256", serialize = FALSE)
-  )
-  testthat::expect_match(manifest$outputs[[1L]]$sha256, "^[0-9a-f]{64}$")
-})
-
-testthat::test_that("manifest omits absent pipeline provenance", {
+testthat::test_that("manifest records hashes and dimensions", {
   output_path <- tempfile(fileext = ".bed.gz")
   writeBin(charToRaw("bed-output"), output_path)
   outputs <- tibble::tibble(
@@ -247,6 +212,15 @@ testthat::test_that("manifest omits absent pipeline provenance", {
   )
 
   testthat::expect_false("pipeline_version" %in% names(manifest))
+  testthat::expect_identical(manifest$tca_version, "1.2.1")
+  testthat::expect_identical(manifest$outputs[[1L]]$dimensions, c(2L, 3L))
+  testthat::expect_identical(manifest$outputs[[1L]]$path, basename(output_path))
+  testthat::expect_identical(manifest$outputs[[1L]]$file_name, basename(output_path))
+  testthat::expect_identical(
+    manifest$outputs[[1L]]$sha256,
+    digest::digest(file = output_path, algo = "sha256", serialize = FALSE)
+  )
+  testthat::expect_match(manifest$outputs[[1L]]$sha256, "^[0-9a-f]{64}$")
 })
 
 testthat::test_that("manifest metadata rejects empty fields and fractional dimensions", {
@@ -305,7 +279,7 @@ testthat::test_that("manifest provenance accepts digests and approved image tags
   )
 })
 
-testthat::test_that("constant exclusions are derived from prepared and modeled genes", {
+testthat::test_that("constant exclusions are derived from input and modeled genes", {
   testthat::expect_true(exists(
     "count_excluded_constant_genes",
     mode = "function"
@@ -330,7 +304,7 @@ testthat::test_that("constant exclusions are derived from prepared and modeled g
   )
 })
 
-testthat::test_that("pipeline QC records validation, row sums, duplicates, and convergence", {
+testthat::test_that("pipeline QC records validation, row sums, and convergence", {
   testthat::expect_true(exists("build_pipeline_qc_summary", mode = "function"))
   if (!exists("build_pipeline_qc_summary", mode = "function")) {
     return(invisible(NULL))
@@ -338,16 +312,6 @@ testthat::test_that("pipeline QC records validation, row sums, duplicates, and c
   export_summary <- tibble::tibble(
     metric = c("gene_count", "sample_count"),
     value = c(3, 2)
-  )
-  mapping_report <- tibble::tibble(
-    gene_id = c("g1", "g2", "g3", "g4"),
-    gene_name = c("A", "A", "B", NA_character_),
-    mapping_action = c(
-      "duplicate_gene_name_aggregated_for_dtangle",
-      "duplicate_gene_name_aggregated_for_dtangle",
-      "mapped",
-      "missing_gene_name"
-    )
   )
   original <- matrix(
     rep(1 / 22, 44L),
@@ -391,7 +355,6 @@ testthat::test_that("pipeline QC records validation, row sums, duplicates, and c
 
   summary <- build_pipeline_qc_summary(
     export_summary = export_summary,
-    mapping_report = mapping_report,
     original_proportions = original,
     combined_proportions = combined,
     tca_weights = weights,
@@ -422,12 +385,7 @@ testthat::test_that("pipeline QC records validation, row sums, duplicates, and c
   )
   testthat::expect_identical(
     summary$metric,
-    c(
-      expected_metric_prefix,
-      "duplicate_gene_symbol_input_row_count",
-      "duplicate_gene_symbol_count",
-      expected_metric_suffix
-    )
+    c(expected_metric_prefix, expected_metric_suffix)
   )
   metric_value <- stats::setNames(summary$value, summary$metric)
   metric_status <- stats::setNames(summary$status, summary$metric)
@@ -444,38 +402,11 @@ testthat::test_that("pipeline QC records validation, row sums, duplicates, and c
   testthat::expect_equal(metric_value[["adjusted_weight_max_row_sum_error"]], 0)
   testthat::expect_equal(metric_value[["normalization_adjustment_max_abs"]], 1e-6)
   testthat::expect_equal(metric_value[["zero_values_adjusted"]], 1)
-  testthat::expect_equal(
-    metric_value[["duplicate_gene_symbol_input_row_count"]],
-    2
-  )
-  testthat::expect_equal(metric_value[["duplicate_gene_symbol_count"]], 1)
   testthat::expect_equal(metric_value[["tca_internal_iterations"]], 2)
   testthat::expect_equal(metric_value[["tca_max_internal_iterations"]], 10)
   testthat::expect_identical(metric_status[["tca_convergence"]], "converged")
   testthat::expect_equal(metric_value[["tca_tau_hat"]], 0.25)
 
-  summary_without_mapping <- build_pipeline_qc_summary(
-    export_summary = export_summary,
-    original_proportions = original,
-    combined_proportions = combined,
-    tca_weights = weights,
-    filter_report = filter_report,
-    tca_model = model,
-    tca_log_lines = tca_log,
-    dtangle_metadata = dtangle_metadata
-  )
-
-  testthat::expect_false(
-    "duplicate_gene_symbol_input_row_count" %in%
-      summary_without_mapping$metric
-  )
-  testthat::expect_false(
-    "duplicate_gene_symbol_count" %in% summary_without_mapping$metric
-  )
-  testthat::expect_identical(
-    summary_without_mapping$metric,
-    c(expected_metric_prefix, expected_metric_suffix)
-  )
 })
 
 testthat::test_that("manifest CLI hashes localized files and publishes basenames", {
@@ -497,15 +428,6 @@ testthat::test_that("manifest CLI hashes localized files and publishes basenames
     metric = c("gene_count", "sample_count"),
     value = c(2, 2)
   ), export_qc_path)
-  mapping_path <- file.path(working_directory, "mapping report.tsv")
-  readr::write_tsv(tibble::tibble(
-    gene_id = c("g1", "g2"),
-    gene_name = c("G", "G"),
-    mapping_action = rep(
-      "duplicate_gene_name_aggregated_for_dtangle",
-      2L
-    )
-  ), mapping_path)
   original <- matrix(
     rep(1 / 22, 44L),
     nrow = 2L,
@@ -548,14 +470,12 @@ testthat::test_that("manifest CLI hashes localized files and publishes basenames
     script,
     "--outputs", inventory_path,
     "--export-qc-summary", export_qc_path,
-    "--mapping-report", mapping_path,
     "--original-proportions", original_path,
     "--combined-proportions", combined_path,
     "--tca-weights", weights_path,
     "--filter-report", filter_path,
     "--model", model_path,
     "--model-log", model_log_path,
-    "--pipeline-version", "test",
     "--tca-version", "1.2.1",
     "--container-image", "celltype-deconvolution:test",
     "--output", manifest_path,
@@ -576,19 +496,8 @@ testthat::test_that("manifest CLI hashes localized files and publishes basenames
     digest::digest(file = bed_path, algo = "sha256", serialize = FALSE)
   )
   final_qc <- readr::read_tsv(qc_path, show_col_types = FALSE)
-  testthat::expect_true(all(c(
-    "duplicate_gene_symbol_count", "tca_convergence"
-  ) %in% final_qc$metric))
-
-  optional_arguments <- arguments[!(arguments %in% c(
-    "--mapping-report", mapping_path, "--pipeline-version", "test"
-  ))]
-  status <- system2("Rscript", shQuote(optional_arguments))
-
-  testthat::expect_identical(status, 0L)
-  manifest <- jsonlite::read_json(manifest_path, simplifyVector = FALSE)
+  testthat::expect_true("tca_convergence" %in% final_qc$metric)
   testthat::expect_false("pipeline_version" %in% names(manifest))
-  final_qc <- readr::read_tsv(qc_path, show_col_types = FALSE)
   testthat::expect_false(
     "duplicate_gene_symbol_input_row_count" %in% final_qc$metric
   )

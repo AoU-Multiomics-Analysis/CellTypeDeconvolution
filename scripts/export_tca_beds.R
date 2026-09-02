@@ -6,42 +6,12 @@ source(file.path(dirname(script_path), "bootstrap.R"))
 
 export_log_path <- NULL
 
-read_bed_coordinates <- function(path) {
-  table <- readr::read_tsv(
-    path,
-    col_types = readr::cols(.default = readr::col_character()),
-    name_repair = "minimal",
-    show_col_types = FALSE,
-    progress = FALSE
-  )
-  required <- c("#chr", "start", "end", "gene_id")
-  if (ncol(table) != length(required) || !identical(names(table), required)) {
-    stop("Coordinates must have the exact BED columns", call. = FALSE)
-  }
-  coordinates <- table |>
-    dplyr::transmute(
-      `#chr` = trimws(.data[["#chr"]]),
-      start = readr::parse_integer(.data$start),
-      end = readr::parse_integer(.data$end),
-      gene_id = trimws(.data$gene_id)
-    )
-  if (nrow(coordinates) == 0L || anyNA(coordinates$start) ||
-      anyNA(coordinates$end) || any(coordinates$start >= coordinates$end) ||
-      any(!nzchar(coordinates[["#chr"]])) || any(!nzchar(coordinates$gene_id)) ||
-      anyDuplicated(coordinates$gene_id) > 0L) {
-    stop("Coordinates must contain valid unique BED gene identifiers", call. = FALSE)
-  }
-  coordinates
-}
-
 run_export_tca_beds <- function() {
   option_list <- list(
     optparse::make_option("--expression", type = "character",
       help = "Coordinate-preserving BED of positive linear CPM values."),
-    optparse::make_option("--expression-log", dest = "expression_log", type = "character",
+    optparse::make_option("--tca-expression", dest = "tca_expression", type = "character",
       help = "Filtered gene-by-sample log2(CPM) TSV with gene_id first column."),
-    optparse::make_option("--coordinates", type = "character",
-      help = "Prepared BED coordinate TSV."),
     optparse::make_option("--model", type = "character",
       help = "Cohort-wide fitted TCA model RDS."),
     optparse::make_option("--weights", type = "character",
@@ -56,19 +26,9 @@ run_export_tca_beds <- function() {
       help = "Export detail log path.")
   )
   options <- optparse::parse_args(optparse::OptionParser(option_list = option_list))
-  coordinate_options <- c("expression", "coordinates")
-  selected_coordinate_options <- coordinate_options[vapply(
-    options[coordinate_options],
-    function(value) !is.null(value) && nzchar(value),
-    logical(1)
-  )]
-  if (length(selected_coordinate_options) != 1L) {
-    stop(
-      "Specify exactly one of --expression or --coordinates",
-      call. = FALSE
-    )
-  }
-  required_options <- c("expression_log", "model", "weights", "output_dir")
+  required_options <- c(
+    "expression", "tca_expression", "model", "weights", "output_dir"
+  )
   missing_options <- required_options[vapply(
     options[required_options],
     function(value) is.null(value) || !nzchar(value),
@@ -90,13 +50,9 @@ run_export_tca_beds <- function() {
     normalizePath(options$output_dir)
   ))
 
-  X <- read_numeric_matrix(options$expression_log, "gene_id")
-  coordinates <- if (!is.null(options$expression) && nzchar(options$expression)) {
-    expression <- read_expression_bed(options$expression)
-    expression$coordinates
-  } else {
-    read_bed_coordinates(options$coordinates)
-  }
+  X <- read_numeric_matrix(options$tca_expression, "gene_id")
+  expression <- read_expression_bed(options$expression)
+  coordinates <- expression$coordinates
   weights <- read_numeric_matrix(options$weights, "sample_id")
   model <- readRDS(options$model)
   C2 <- if (is.null(options$covariates) || !nzchar(options$covariates)) {
@@ -131,7 +87,7 @@ run_export_tca_beds <- function() {
   )
   paths_message <- sprintf(
     "stage=export_tca_beds input_paths=%s output_dir=%s",
-    paste(c(options$expression_log, options[[selected_coordinate_options]], options$model, options$weights,
+    paste(c(options$tca_expression, options$expression, options$model, options$weights,
       options$covariates), collapse = ","), options$output_dir
   )
   message(dimensions_message)

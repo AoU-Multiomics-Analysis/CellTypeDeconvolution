@@ -1,8 +1,8 @@
-version 1.1
+version 1.0
 
 task FitTca {
   input {
-    File prepared_log2_cpm
+    File expression
     File tca_weights
     File? covariates
     Int max_iters = 10
@@ -30,7 +30,7 @@ task FitTca {
       covariates_arguments=(--covariates "$covariates_path")
     fi
     Rscript /opt/celltype/scripts/fit_tca.R \
-      --expression-log '~{prepared_log2_cpm}' \
+      --expression '~{expression}' \
       --weights '~{tca_weights}' \
       "${covariates_arguments[@]}" \
       --num-cores '~{cpu}' \
@@ -68,7 +68,7 @@ task FitTca {
 task ExportTcaBeds {
   input {
     File tca_expression
-    File coordinates
+    File expression
     File model
     File tca_weights
     File? covariates
@@ -95,8 +95,8 @@ task ExportTcaBeds {
       covariates_arguments=(--covariates "$covariates_path")
     fi
     Rscript /opt/celltype/scripts/export_tca_beds.R \
-      --expression-log '~{tca_expression}' \
-      --coordinates '~{coordinates}' \
+      --tca-expression '~{tca_expression}' \
+      --expression '~{expression}' \
       --model '~{model}' \
       --weights '~{tca_weights}' \
       "${covariates_arguments[@]}" \

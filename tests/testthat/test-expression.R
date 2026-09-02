@@ -17,18 +17,27 @@ testthat::test_that("GTF parsing retains all gene types and ignores non-gene rec
   testthat::expect_identical(observed$gene_type, c("protein_coding", "lncRNA"))
 })
 
-testthat::test_that("duplicate gene names are summed without CPM renormalization", {
+testthat::test_that("dtangle view sums duplicate symbols without CPM renormalization", {
   cpm <- matrix(c(2, 3, 5, 7), nrow = 2,
     dimnames = list(c("g1", "g2"), c("s1", "s2")))
+  expression <- list(
+    coordinates = tibble::tibble(
+      `#chr` = c("chr1", "chr1"), start = c(0L, 10L),
+      end = c(5L, 15L), gene_id = c("g1", "g2")
+    ),
+    cpm = cpm
+  )
   annotation <- tibble::tibble(
     gene_id = c("g1", "g2"), gene_name = c("A", "A"), gene_type = c("x", "y")
   )
 
-  result <- prepare_expression(cpm, annotation)
+  result <- make_dtangle_expression(expression, annotation)
 
-  testthat::expect_identical(rownames(result$cpm), "A")
-  testthat::expect_equal(unname(result$cpm), matrix(c(5, 12), nrow = 1))
-  testthat::expect_equal(result$log_expression, log2(result$cpm))
+  testthat::expect_identical(rownames(result$log_expression), "A")
+  testthat::expect_equal(
+    unname(result$log_expression),
+    log2(matrix(c(5, 12), nrow = 1))
+  )
   testthat::expect_identical(
     result$mapping_report$mapping_action,
     c(
@@ -117,34 +126,6 @@ testthat::test_that("duplicate aggregation does not pivot the full expression ma
   testthat::expect_no_error(collapse_cpm_to_gene_names(cpm, annotation))
 })
 
-testthat::test_that("BED preparation preserves gene IDs and collapses only dtangle symbols", {
-  bed_path <- tempfile(fileext = ".bed.gz")
-  input <- tibble::tibble(
-    `#chr` = c("chr1", "chr2", "chr3"),
-    start = c(0L, 100L, 200L),
-    end = c(50L, 150L, 250L),
-    gene_id = c("g1", "g2", "g3"),
-    S1 = c(2, 3, 5),
-    S2 = c(7, 11, 13)
-  )
-  readr::write_tsv(input, bed_path)
-  annotation <- tibble::tibble(
-    gene_id = c("g1", "g2", "g3"),
-    gene_name = c("A", "A", "B"),
-    gene_type = c("protein_coding", "lncRNA", NA_character_)
-  )
-
-  expression <- read_expression_bed(bed_path)
-  result <- prepare_expression_bed(expression, annotation)
-
-  testthat::expect_identical(rownames(result$tca_cpm), c("g1", "g2", "g3"))
-  testthat::expect_identical(result$coordinates, input[1:4])
-  testthat::expect_identical(rownames(result$dtangle_cpm), c("A", "B"))
-  testthat::expect_equal(unname(result$dtangle_cpm["A", ]), c(5, 18))
-  testthat::expect_equal(result$tca_log_expression, log2(result$tca_cpm))
-  testthat::expect_equal(result$dtangle_log_expression, log2(result$dtangle_cpm))
-})
-
 testthat::test_that("BED validation rejects invalid coordinates and duplicate IDs", {
   invalid <- tibble::tibble(
     `#chr` = c("chr1", "chr1"), start = c(10L, 20L),
@@ -173,14 +154,23 @@ testthat::test_that("BED validation rejects non-positive, missing, and nonfinite
   }
 })
 
-testthat::test_that("prepared CPM must be strictly positive", {
+testthat::test_that("dtangle CPM must be strictly positive", {
   cpm <- matrix(c(1, 0), nrow = 1,
     dimnames = list("g1", c("s1", "s2")))
+  expression <- list(
+    coordinates = tibble::tibble(
+      `#chr` = "chr1", start = 0L, end = 5L, gene_id = "g1"
+    ),
+    cpm = cpm
+  )
   annotation <- tibble::tibble(
     gene_id = "g1", gene_name = "A", gene_type = NA_character_
   )
 
-  testthat::expect_error(prepare_expression(cpm, annotation), "strictly positive")
+  testthat::expect_error(
+    make_dtangle_expression(expression, annotation),
+    "positive CPM"
+  )
 })
 
 testthat::test_that("compressed GTF and trimmed IDs are supported", {
@@ -194,10 +184,19 @@ testthat::test_that("compressed GTF and trimmed IDs are supported", {
   cpm <- matrix(c(2, 4), nrow = 1,
     dimnames = list(" g1 ", c("s1", "s2")))
 
-  result <- prepare_expression(cpm, read_gtf_gene_annotation(gtf))
+  expression <- list(
+    coordinates = tibble::tibble(
+      `#chr` = "chr1", start = 0L, end = 5L, gene_id = "g1"
+    ),
+    cpm = cpm
+  )
+  result <- make_dtangle_expression(
+    expression,
+    read_gtf_gene_annotation(gtf)
+  )
 
-  testthat::expect_identical(rownames(result$cpm), "A")
-  testthat::expect_equal(as.numeric(result$cpm), c(2, 4))
+  testthat::expect_identical(rownames(result$log_expression), "A")
+  testthat::expect_equal(as.numeric(result$log_expression), log2(c(2, 4)))
 })
 
 testthat::test_that("missing gene names and GTF IDs are reported", {
@@ -208,14 +207,22 @@ testthat::test_that("missing gene names and GTF IDs are reported", {
     gene_type = c("protein_coding", "lncRNA")
   )
 
-  result <- prepare_expression(cpm, annotation)
+  expression <- list(
+    coordinates = tibble::tibble(
+      `#chr` = rep("chr1", 3L), start = c(0L, 10L, 20L),
+      end = c(5L, 15L, 25L), gene_id = c("g1", "g2", "g3")
+    ),
+    cpm = cpm
+  )
+  result <- make_dtangle_expression(expression, annotation)
+  excluded_genes <- make_excluded_genes(result$mapping_report)
 
   testthat::expect_identical(
     result$mapping_report$mapping_action,
     c("mapped", "missing_gene_name", "missing_gtf_gene_id")
   )
-  testthat::expect_true(any(result$excluded_genes$gene_id == "g2"))
-  testthat::expect_true(any(result$excluded_genes$gene_id == "g3"))
+  testthat::expect_true(any(excluded_genes$gene_id == "g2"))
+  testthat::expect_true(any(excluded_genes$gene_id == "g3"))
 })
 
 testthat::test_that("duplicate GTF IDs stop validation", {
@@ -232,41 +239,4 @@ testthat::test_that("malformed GTF records stop parsing", {
   writeLines("1\tsrc\tgene\t1\t10", gtf)
 
   testthat::expect_error(read_gtf_gene_annotation(gtf), "nine.*fields")
-})
-
-testthat::test_that("the BED CLI writes its seven declared outputs", {
-  input <- tempfile(fileext = ".bed.gz")
-  gtf <- tempfile(fileext = ".gtf")
-  output_dir <- tempfile()
-  dir.create(output_dir)
-  readr::write_tsv(
-    tibble::tibble(
-      `#chr` = "chr1", start = 0L, end = 10L, gene_id = "g1", s1 = 2, s2 = 4
-    ),
-    input
-  )
-  writeLines(
-    "1\tsrc\tgene\t1\t10\t.\t+\t.\tgene_id \"g1\"; gene_name \"A\";",
-    gtf
-  )
-  original_working_directory <- setwd(pipeline_root)
-  on.exit(setwd(original_working_directory), add = TRUE)
-
-  status <- system2(
-    file.path(R.home("bin"), "Rscript"),
-    c("scripts/prepare_expression.R", "--expression", shQuote(input),
-      "--gtf", shQuote(gtf), "--output-dir", shQuote(output_dir))
-  )
-  expected <- c(
-    "prepared_tca_cpm.tsv.gz",
-    "prepared_tca_log2_cpm.tsv.gz",
-    "prepared_dtangle_cpm.tsv.gz",
-    "prepared_dtangle_log2_cpm.tsv.gz",
-    "prepared_coordinates.tsv",
-    "gene_mapping_report.tsv",
-    "excluded_genes.tsv"
-  )
-
-  testthat::expect_equal(status, 0L)
-  testthat::expect_true(all(file.exists(file.path(output_dir, expected))))
 })

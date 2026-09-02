@@ -14,12 +14,6 @@ run_tca_stage <- function() {
       help = "Coordinate-preserving BED of positive linear CPM values."
     ),
     optparse::make_option(
-      "--expression-log",
-      dest = "expression_log",
-      type = "character",
-      help = "Gene-by-sample log2(CPM) TSV with gene_id first column."
-    ),
-    optparse::make_option(
       "--weights",
       type = "character",
       help = "Sample-by-group TCA weight TSV with sample_id first column."
@@ -59,19 +53,7 @@ run_tca_stage <- function() {
     )
   )
   options <- optparse::parse_args(optparse::OptionParser(option_list = option_list))
-  expression_options <- c("expression", "expression_log")
-  selected_expression_options <- expression_options[vapply(
-    options[expression_options],
-    function(value) !is.null(value) && nzchar(value),
-    logical(1)
-  )]
-  if (length(selected_expression_options) != 1L) {
-    stop(
-      "Specify exactly one of --expression or --expression-log",
-      call. = FALSE
-    )
-  }
-  required_options <- c("weights", "output_dir")
+  required_options <- c("expression", "weights", "output_dir")
   missing_options <- required_options[vapply(
     options[required_options],
     function(value) is.null(value) || !nzchar(value),
@@ -101,12 +83,8 @@ run_tca_stage <- function() {
   )
   message(sprintf("stage=tca utc_start=%s scale=log2_cpm", tca_utc_time()))
 
-  X <- if (!is.null(options$expression) && nzchar(options$expression)) {
-    expression <- read_expression_bed(options$expression)
-    make_tca_expression(expression)
-  } else {
-    read_numeric_matrix(options$expression_log, "gene_id")
-  }
+  expression <- read_expression_bed(options$expression)
+  X <- make_tca_expression(expression)
   W <- read_numeric_matrix(options$weights, "sample_id")
   C2 <- if (is.null(options$covariates) || !nzchar(options$covariates)) {
     NULL

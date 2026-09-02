@@ -1,8 +1,9 @@
-version 1.1
+version 1.0
 
 task RunDtangle {
   input {
-    File prepared_log2_cpm
+    File expression
+    File gtf
     File lm22
     Float min_overlap = 0.80
     Float marker_fraction = 0.10
@@ -26,7 +27,8 @@ task RunDtangle {
     printf 'stage=%s start_time=%s\n' "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
     trap 'status=$?; printf "stage=%s error_status=%s time=%s\\n" "$stage" "$status" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"; exit "$status"' ERR
     Rscript /opt/celltype/scripts/run_dtangle.R \
-      --bulk-log '~{prepared_log2_cpm}' \
+      --expression '~{expression}' \
+      --gtf '~{gtf}' \
       --lm22 '~{lm22}' \
       --min-overlap '~{min_overlap}' \
       --marker-fraction '~{marker_fraction}' \

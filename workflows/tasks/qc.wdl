@@ -1,4 +1,4 @@
-version 1.1
+version 1.0
 
 task BuildManifest {
   input {
@@ -8,15 +8,12 @@ task BuildManifest {
     File export_qc_plots
     File model
     File model_log
-    File mapping_report
-    File excluded_genes
     File original_proportions
     File combined_proportions
     File tca_weights
     File filter_report
     File? dtangle_metadata
     File? parameters_json
-    String pipeline_version
     String tca_version = "1.2.1"
     String container_image
     String docker_image
@@ -80,7 +77,7 @@ task BuildManifest {
       fi
     }
     cat > bed_output_sources.txt <<'BED_OUTPUT_SOURCES'
-~{sep('\n', cell_type_beds)}
+~{sep='\n' cell_type_beds}
 BED_OUTPUT_SOURCES
     : > array_basenames.txt
     while IFS= read -r source_path; do
@@ -161,8 +158,6 @@ BED_OUTPUT_SOURCES
       '~{export_qc_plots}' \
       '~{model}' \
       '~{model_log}' \
-      '~{mapping_report}' \
-      '~{excluded_genes}' \
       '~{original_proportions}' \
       '~{combined_proportions}' \
       '~{tca_weights}' \
@@ -170,7 +165,6 @@ BED_OUTPUT_SOURCES
     Rscript /opt/celltype/scripts/build_manifest.R \
       --outputs "$checksum_inventory" \
       --export-qc-summary '~{export_qc_summary}' \
-      --mapping-report '~{mapping_report}' \
       --original-proportions '~{original_proportions}' \
       --combined-proportions '~{combined_proportions}' \
       --tca-weights '~{tca_weights}' \
@@ -178,7 +172,6 @@ BED_OUTPUT_SOURCES
       --model '~{model}' \
       --model-log '~{model_log}' \
       "${dtangle_metadata_arguments[@]}" \
-      --pipeline-version '~{pipeline_version}' \
       --tca-version '~{tca_version}' \
       "${parameters_arguments[@]}" \
       --container-image '~{container_image}' \

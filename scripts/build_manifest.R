@@ -21,13 +21,6 @@ run_build_manifest <- function() {
       help = "Direct BED export QC summary TSV."
     ),
     optparse::make_option(
-      "--mapping-report",
-      dest = "mapping_report",
-      type = "character",
-      default = NULL,
-      help = "Gene mapping report TSV from expression preparation."
-    ),
-    optparse::make_option(
       "--original-proportions",
       dest = "original_proportions",
       type = "character",
@@ -68,13 +61,6 @@ run_build_manifest <- function() {
       type = "character",
       default = NULL,
       help = "Optional dtangle metadata JSON with LM22 QC."
-    ),
-    optparse::make_option(
-      "--pipeline-version",
-      dest = "pipeline_version",
-      type = "character",
-      default = NULL,
-      help = "Pipeline version."
     ),
     optparse::make_option(
       "--tca-version",
@@ -165,17 +151,6 @@ run_build_manifest <- function() {
     show_col_types = FALSE,
     progress = FALSE
   )
-  mapping_report <- if (is.null(options$mapping_report) ||
-      !nzchar(options$mapping_report)) {
-    NULL
-  } else {
-    readr::read_tsv(
-      options$mapping_report,
-      col_types = readr::cols(.default = readr::col_character()),
-      show_col_types = FALSE,
-      progress = FALSE
-    )
-  }
   original_proportions <- read_numeric_matrix(
     options$original_proportions,
     "sample_id"
@@ -235,14 +210,12 @@ run_build_manifest <- function() {
 
   manifest <- build_output_manifest(
     outputs = outputs,
-    pipeline_version = options$pipeline_version,
     tca_version = options$tca_version,
     parameters = parameters,
     container_image = options$container_image
   )
   qc_summary <- build_pipeline_qc_summary(
     export_summary = export_qc_summary,
-    mapping_report = mapping_report,
     original_proportions = original_proportions,
     combined_proportions = combined_proportions,
     tca_weights = tca_weights,

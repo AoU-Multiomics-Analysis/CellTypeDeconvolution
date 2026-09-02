@@ -7,6 +7,77 @@ wdl_text <- function(path) {
   )
 }
 
+testthat::test_that("all active WDL files use WDL 1.0", {
+  workflows_directory <- testthat::test_path("..", "..", "workflows")
+  files <- list.files(
+    workflows_directory,
+    pattern = "[.]wdl$",
+    recursive = TRUE,
+    full.names = TRUE
+  )
+  declarations <- vapply(
+    files,
+    function(path) readLines(path, n = 1L, warn = FALSE),
+    character(1)
+  )
+  testthat::expect_true(
+    all(declarations == "version 1.0"),
+    info = paste(files, declarations)
+  )
+})
+
+testthat::test_that("top workflow has one global runtime policy and no preparation task", {
+  text <- wdl_text("workflows/cell_type_deconvolution.wdl")
+  workflow_inputs <- stringr::str_match(
+    text,
+    "workflow cell_type_deconvolution \\{\\n  input \\{([\\s\\S]*?)\\n  \\}"
+  )[, 2L]
+
+  testthat::expect_match(
+    text,
+    'String docker_image = "ghcr.io/aou-multiomics-analysis/celltypedeconvolution:latest"',
+    fixed = TRUE
+  )
+  testthat::expect_match(text, "Int preemptible_attempts = 2", fixed = TRUE)
+  testthat::expect_match(text, "Int max_retries = 2", fixed = TRUE)
+  testthat::expect_identical(
+    stringr::str_count(
+      workflow_inputs,
+      stringr::fixed("Int preemptible_attempts = 2")
+    ),
+    1L
+  )
+  testthat::expect_identical(
+    stringr::str_count(
+      workflow_inputs,
+      stringr::fixed("Int max_retries = 2")
+    ),
+    1L
+  )
+  testthat::expect_identical(
+    stringr::str_count(
+      text,
+      stringr::fixed("preemptible_attempts = preemptible_attempts")
+    ),
+    6L
+  )
+  testthat::expect_identical(
+    stringr::str_count(
+      text,
+      stringr::fixed("max_retries = max_retries")
+    ),
+    6L
+  )
+  testthat::expect_false(grepl(
+    paste0(
+      "(prepare|dtangle|proportions|fit|export|manifest)_",
+      "(preemptible_attempts|max_retries)|pipeline_version"
+    ),
+    workflow_inputs
+  ))
+  testthat::expect_false(grepl("PrepareExpression|expression_tasks", text))
+})
+
 testthat::test_that("smoke fixture is BED and contains a duplicate gene symbol", {
   bed <- readr::read_tsv(
     testthat::test_path("..", "fixtures", "synthetic_expression.bed"),
@@ -59,13 +130,13 @@ expect_task_contract <- function(path, task, inputs, outputs, defaults) {
   testthat::expect_match(text, "max_retries", fixed = TRUE)
 }
 
-testthat::test_that("the expression WDL requires CPM and GTF", {
-  text <- wdl_text("workflows/tasks/expression.wdl")
-  testthat::expect_match(text, "File expression", fixed = TRUE)
-  testthat::expect_match(text, "File gtf", fixed = TRUE)
-  testthat::expect_match(text, "prepared_tca_cpm", fixed = TRUE)
-  testthat::expect_match(text, "prepared_tca_log2_cpm", fixed = TRUE)
-  testthat::expect_false(grepl("expression_type|gene_length", text))
+testthat::test_that("the obsolete expression preparation task is absent", {
+  testthat::expect_false(file.exists(testthat::test_path(
+    "..", "..", "workflows", "tasks", "expression.wdl"
+  )))
+  testthat::expect_false(file.exists(testthat::test_path(
+    "..", "..", "scripts", "prepare_expression.R"
+  )))
 })
 
 testthat::test_that("top workflow uses one direct BED export", {
@@ -77,20 +148,15 @@ testthat::test_that("top workflow uses one direct BED export", {
   )
   purrr::walk(c(
     "Int export_cpu = 8", "String export_memory = \"128 GB\"",
-    "Int export_disk_gb = 500", "Int export_preemptible_attempts = 0",
-    "Int export_max_retries = 1"
+    "Int export_disk_gb = 500"
   ), ~ testthat::expect_match(text, .x, fixed = TRUE))
   testthat::expect_match(text, "Array[File] cell_type_beds", fixed = TRUE)
   testthat::expect_match(
     text,
-    "prepared_log2_cpm = PrepareExpression.prepared_tca_log2_cpm",
+    "expression = expression",
     fixed = TRUE
   )
-  testthat::expect_match(
-    text,
-    "prepared_log2_cpm = PrepareExpression.prepared_dtangle_log2_cpm",
-    fixed = TRUE
-  )
+  testthat::expect_match(text, "gtf = gtf", fixed = TRUE)
   testthat::expect_false(grepl(
     "scatter|shard|hdf5|group_tsv|write_tsv",
     text,
@@ -156,7 +222,7 @@ testthat::test_that("top-level manifest records effective parameters with a pinn
   )
   testthat::expect_match(
     text,
-    "EffectiveParameters effective_parameters = EffectiveParameters {",
+    "EffectiveParameters effective_parameters = object {",
     fixed = TRUE
   )
   testthat::expect_match(
@@ -320,18 +386,8 @@ testthat::test_that("synthetic smoke fixtures are deterministic and restart with
 
 testthat::test_that("all modular WDL tasks declare CLI-aligned interfaces", {
   expect_task_contract(
-    "workflows/tasks/expression.wdl", "PrepareExpression",
-    c("File expression", "File gtf", "String docker_image"),
-    c("File prepared_tca_cpm", "File prepared_tca_log2_cpm",
-      "File prepared_dtangle_cpm", "File prepared_dtangle_log2_cpm",
-      "File prepared_coordinates", "File mapping_report",
-      "File excluded_genes", "File log"),
-    c("Int cpu = 4", "String memory = \"64 GB\"", "Int disk_gb = 400",
-      "Int preemptible_attempts = 2", "Int max_retries = 2")
-  )
-  expect_task_contract(
     "workflows/tasks/dtangle.wdl", "RunDtangle",
-    c("File prepared_log2_cpm", "File lm22", "Float min_overlap",
+    c("File expression", "File gtf", "File lm22", "Float min_overlap",
       "Float marker_fraction", "String marker_method", "Boolean quantile_normalize"),
     c("File proportions", "File markers", "File metadata", "File overlap_report",
       "File transformed_lm22", "File shared_bulk", "File log"),
@@ -355,7 +411,7 @@ testthat::test_that("all modular WDL tasks declare CLI-aligned interfaces", {
   tca_text <- wdl_text("workflows/tasks/tca.wdl")
   testthat::expect_match(tca_text, "task FitTca", fixed = TRUE)
   purrr::walk(c(
-    "File prepared_log2_cpm", "File tca_weights", "File? covariates",
+    "File expression", "File tca_weights", "File? covariates",
     "Int max_iters", "Int random_seed", "File model",
     "File model_log", "File tca_expression", "File excluded_genes",
     "Int cpu = 16", "String memory = \"192 GB\"", "Int disk_gb = 750",
@@ -363,7 +419,7 @@ testthat::test_that("all modular WDL tasks declare CLI-aligned interfaces", {
   ), ~ testthat::expect_match(tca_text, .x, fixed = TRUE))
   testthat::expect_match(tca_text, "task ExportTcaBeds", fixed = TRUE)
   purrr::walk(c(
-    "File tca_expression", "File coordinates", "File model",
+    "File tca_expression", "File expression", "File model",
     "File tca_weights", "Array[File] cell_type_beds",
     "File cell_type_bed_inventory", "File reconstruction_by_sample",
     "File qc_summary", "File qc_plots", "File export_detail_log"
@@ -377,6 +433,10 @@ testthat::test_that("all modular WDL tasks declare CLI-aligned interfaces", {
     "Int cpu = 4", "String memory = \"32 GB\"", "Int disk_gb = 100",
     "Int preemptible_attempts = 1", "Int max_retries = 2"
   ), ~ testthat::expect_match(qc_text, .x, fixed = TRUE))
+  testthat::expect_false(grepl(
+    "mapping_report|pipeline_version",
+    qc_text
+  ))
 })
 
 testthat::test_that("optional WDL file arguments use quoted shell arrays", {

@@ -293,26 +293,44 @@ testthat::test_that("dtangle returns normalized proportions and nonempty markers
 testthat::test_that("the dtangle CLI writes its six declared outputs", {
   testthat::skip_if_not_installed("dtangle")
   lm22 <- make_synthetic_lm22()
-  bulk_log <- matrix(
-    log2(5),
+  expression_cpm <- matrix(
+    5,
     nrow = nrow(lm22),
     ncol = 1,
     dimnames = list(rownames(lm22), "S1")
   )
   lm22_path <- tempfile(fileext = ".tsv")
-  bulk_path <- tempfile(fileext = ".tsv")
+  expression_path <- tempfile(fileext = ".bed")
+  gtf_path <- tempfile(fileext = ".gtf")
   output_dir <- tempfile()
   dir.create(output_dir)
   write_numeric_matrix(lm22, lm22_path, "gene_symbol")
-  write_numeric_matrix(bulk_log, bulk_path, "gene_name")
+  expression_table <- tibble::tibble(
+    `#chr` = "chr1",
+    start = seq(0L, by = 10L, length.out = nrow(expression_cpm)),
+    end = seq(5L, by = 10L, length.out = nrow(expression_cpm)),
+    gene_id = paste0("gene", seq_len(nrow(expression_cpm)))
+  ) |>
+    dplyr::bind_cols(tibble::as_tibble(expression_cpm))
+  readr::write_tsv(expression_table, expression_path)
+  writeLines(
+    sprintf(
+      "1\tsrc\tgene\t%d\t%d\t.\t+\t.\tgene_id \"%s\"; gene_name \"%s\";",
+      expression_table$start + 1L,
+      expression_table$end,
+      expression_table$gene_id,
+      rownames(lm22)
+    ),
+    gtf_path
+  )
   original_working_directory <- setwd(pipeline_root)
   on.exit(setwd(original_working_directory), add = TRUE)
 
   status <- system2(
     file.path(R.home("bin"), "Rscript"),
     c(
-      "scripts/run_dtangle.R", "--bulk-log", bulk_path, "--lm22", lm22_path,
-      "--output-dir", output_dir
+      "scripts/run_dtangle.R", "--expression", expression_path,
+      "--gtf", gtf_path, "--lm22", lm22_path, "--output-dir", output_dir
     )
   )
 

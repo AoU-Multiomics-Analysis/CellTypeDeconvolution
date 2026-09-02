@@ -36,6 +36,35 @@ testthat::test_that("both examples use BED and GTF workflow inputs", {
   })
 })
 
+testthat::test_that("smoke inputs use the simplified global runtime controls", {
+  fixtures <- c("dtangle.inputs.json", "restart.inputs.json")
+  removed_inputs <- c(
+    "pipeline_version",
+    "prepare_cpu", "prepare_memory", "prepare_disk_gb",
+    paste0(
+      c("prepare", "dtangle", "proportions", "fit", "export", "manifest"),
+      rep(c("_preemptible_attempts", "_max_retries"), each = 6L)
+    )
+  )
+
+  purrr::walk(fixtures, function(fixture) {
+    inputs <- jsonlite::read_json(testthat::test_path("..", "fixtures", fixture))
+    testthat::expect_identical(
+      inputs$cell_type_deconvolution.preemptible_attempts,
+      2L
+    )
+    testthat::expect_identical(inputs$cell_type_deconvolution.max_retries, 2L)
+    testthat::expect_false("cell_type_deconvolution.pipeline_version" %in% names(inputs))
+    testthat::expect_false(any(paste0(
+      "cell_type_deconvolution.", removed_inputs
+    ) %in% names(inputs)))
+    testthat::expect_identical(
+      inputs$cell_type_deconvolution.docker_image,
+      "celltype-deconvolution:test"
+    )
+  })
+})
+
 testthat::test_that("Terra guidance gives the input scale and LM22 contract", {
   text <- paste(
     readLines(testthat::test_path("../..", "docs", "terra.md")),

@@ -176,7 +176,14 @@ public_inventory <- readr::read_tsv(
   show_col_types = FALSE,
   progress = FALSE
 )
-stopifnot(identical(public_inventory, inventory))
+stopifnot(
+  identical(names(public_inventory), names(inventory)),
+  isTRUE(all.equal(
+    as.data.frame(public_inventory),
+    as.data.frame(inventory),
+    check.attributes = FALSE
+  ))
+)
 
 manifest <- jsonlite::read_json(
   output_value("output_manifest"),

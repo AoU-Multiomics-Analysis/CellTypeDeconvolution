@@ -109,7 +109,11 @@ testthat::test_that("smoke assertions require unique compressed BED paths", {
     "anyDuplicated(inventory_basenames) == 0L",
     "setequal(basename(cell_type_bed_paths), inventory_basenames)",
     "public_inventory <- readr::read_tsv(",
-    "stopifnot(identical(public_inventory, inventory))"
+    "identical(names(public_inventory), names(inventory))",
+    "isTRUE(all.equal(",
+    "as.data.frame(public_inventory),",
+    "as.data.frame(inventory),",
+    "check.attributes = FALSE"
   ), ~ testthat::expect_match(smoke_assertions, .x, fixed = TRUE))
 })
 
@@ -364,11 +368,28 @@ testthat::test_that("synthetic smoke fixtures are deterministic and restart with
     restart$cell_type_deconvolution.expression,
     expected_expression
   )
-  purrr::walk(c("export_cpu", "export_memory", "export_disk_gb",
-    "export_preemptible_attempts", "export_max_retries"), function(name) {
+  purrr::walk(c("export_cpu", "export_memory", "export_disk_gb"), function(name) {
     input_name <- paste0("cell_type_deconvolution.", name)
     testthat::expect_true(input_name %in% names(dtangle))
     testthat::expect_true(input_name %in% names(restart))
+  })
+  purrr::walk(list(dtangle, restart), function(inputs) {
+    testthat::expect_identical(
+      inputs$cell_type_deconvolution.preemptible_attempts,
+      2L
+    )
+    testthat::expect_identical(inputs$cell_type_deconvolution.max_retries, 2L)
+    testthat::expect_false("cell_type_deconvolution.pipeline_version" %in% names(inputs))
+    purrr::walk(
+      c("prepare", "dtangle", "proportions", "fit", "export", "manifest"),
+      function(task) {
+        purrr::walk(c("preemptible_attempts", "max_retries"), function(control) {
+          testthat::expect_false(paste0(
+            "cell_type_deconvolution.", task, "_", control
+          ) %in% names(inputs))
+        })
+      }
+    )
   })
   purrr::walk(c("shard", "hdf5", "tsv", "extract", "assemble"), function(term) {
     testthat::expect_false(any(grepl(

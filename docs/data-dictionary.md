@@ -58,7 +58,7 @@ Set exactly one of `lm22` and `precomputed_proportions`. The workflow records th
 | `proportions_log` | `File` | Both | Proportion-processing task log. |
 | `tca_model` | `File` | Both | Serialized cohort-wide TCA model. |
 | `tca_model_log` | `File` | Both | TCA model-fit log. |
-| `tca_expression` | `File` | Both | Full TCA `log2_cpm` matrix after mapped constant-gene removal. |
+| `tca_expression` | `File` | Both | Full TCA `log2_cpm` matrix after constant-gene removal. |
 | `tca_excluded_genes` | `File` | Both | Genes excluded before TCA fitting because they are constant or invalid. |
 | `fit_tca_log` | `File` | Both | TCA-fit task log. |
 | `cell_type_beds` | `Array[File]` | Both | One BED.GZ file for each retained group. Files preserve coordinates, modeled-gene order, and sample order. |
@@ -73,11 +73,11 @@ Set exactly one of `lm22` and `precomputed_proportions`. The workflow records th
 | `manifest_log` | `File` | Both | Manifest-creation task log. |
 | `effective_parameters_file` | `File` | Both | JSON with effective scientific settings. |
 
-The workflow does not have an expression-preparation task. It does not produce preparation outputs or a pipeline-version output. TCA reads every valid nonconstant gene from the BED and applies `log2()` once. dtangle maps gene IDs with the GTF and applies `log2()` once.
+The workflow does not have an expression-preparation task. It does not produce preparation outputs or a pipeline-version output. TCA reads every valid nonconstant gene from the BED and applies `log2()` once. TCA does not use the GTF. dtangle maps gene IDs with the GTF and applies `log2()` once.
 
 ## BED output contract
 
-The workflow performs one direct tensor extraction. Each output starts with `#chr`, `start`, `end`, and `gene_id`. The remaining columns are sample IDs in input order. Rows are mapped, nonconstant TCA genes in input BED order. Values use the `log2_cpm` model scale. The values are statistical estimates. They are not counts, linear CPM, or absolute expression values.
+The workflow performs one direct tensor extraction. Each output starts with `#chr`, `start`, `end`, and `gene_id`. The remaining columns are sample IDs in input order. Rows are valid, nonconstant TCA genes in input BED order. Values use the `log2_cpm` model scale. The values are statistical estimates. They are not counts, linear CPM, or absolute expression values.
 
 `cell_type_beds` is the authoritative file array. Public inventories and the manifest use stable BED basenames. The manifest uses localized paths only while it calculates checksums.
 

@@ -14,7 +14,7 @@ Provide `expression` as a tab-delimited BED or BED.GZ matrix. The leading column
 
 Provide `gtf` as a GTF or GTF.GZ file. It must contain `gene` records with `gene_id` and `gene_name`. The workflow does not apply a gene-type filter.
 
-The workflow trims surrounding white space before it matches identifiers. Matching is otherwise exact. The TCA view keeps one mapped row for each input `gene_id`, with its BED coordinates and order. It does not collapse duplicate gene symbols. The dtangle view uses gene symbols and sums linear CPM for duplicate symbols. This keeps the TCA coordinate identity and gives dtangle one value per symbol.
+The workflow trims surrounding white space before it matches identifiers. Matching is otherwise exact. TCA reads the direct BED and keeps each valid input `gene_id`, with its BED coordinates and order. It does not use the GTF. The dtangle view maps gene IDs with the GTF, uses gene symbols, and sums linear CPM for duplicate symbols. This keeps the TCA coordinate identity and gives dtangle one value per symbol.
 
 ## Proportion modes
 
@@ -32,7 +32,7 @@ The workflow does not have an expression-preparation task. TCA reads every valid
 
 The workflow performs one direct tensor extraction. It writes one BED.GZ file per retained major cell group. Each file uses the `log2_cpm` model scale. These values are inferred log-expression estimates. They are not counts, linear CPM, or absolute cell-type expression values.
 
-Each BED.GZ output preserves `#chr`, `start`, `end`, `gene_id`, modeled-gene order, and sample-column order. It excludes unmapped genes and genes that are constant before fitting. `cell_type_beds` is the authoritative array of files. `cell_type_bed_inventory` and `output_inventory` use stable BED basenames. The output manifest also uses these basenames. The manifest task uses localized paths only for checksum calculation.
+Each BED.GZ output preserves `#chr`, `start`, `end`, `gene_id`, modeled-gene order, and sample-column order. It excludes genes that are constant before fitting. Every other valid BED gene stays in the TCA output. `cell_type_beds` is the authoritative array of files. `cell_type_bed_inventory` and `output_inventory` use stable BED basenames. The output manifest also uses these basenames. The manifest task uses localized paths only for checksum calculation.
 
 The GitHub `latest` image is the default. `docker_image` is optional. `preemptible_attempts` and `max_retries` are global controls that apply to every task. Task resource inputs are optional. See [the data dictionary](docs/data-dictionary.md) for every input and output.
 

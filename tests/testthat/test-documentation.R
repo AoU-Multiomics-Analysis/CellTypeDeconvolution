@@ -117,6 +117,28 @@ testthat::test_that("active dependencies and guides use direct BED outputs", {
   ))
 })
 
+testthat::test_that("TCA guidance keeps all valid BED genes", {
+  guides <- vapply(
+    c("README.md", "docs/terra.md", "docs/data-dictionary.md"),
+    function(path) paste(readLines(
+      testthat::test_path("../..", path), warn = FALSE
+    ), collapse = "\n"),
+    character(1)
+  )
+  purrr::walk(guides, function(text) {
+    testthat::expect_match(
+      text,
+      "TCA reads every valid nonconstant gene from the BED"
+    )
+    testthat::expect_false(grepl(
+      "TCA[^\\n.]*mapped|mapped[^\\n.]*TCA|TCA[^\\n.]*unmapped|unmapped[^\\n.]*TCA",
+      text,
+      ignore.case = TRUE
+    ))
+    testthat::expect_false(grepl("excludes unmapped genes", text, fixed = TRUE))
+  })
+})
+
 testthat::test_that("data dictionary uses the implemented overlap interval", {
   text <- paste(
     readLines(testthat::test_path("../..", "docs", "data-dictionary.md")),

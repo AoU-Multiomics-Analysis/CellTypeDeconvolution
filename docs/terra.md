@@ -8,7 +8,7 @@ Import `workflows/cell_type_deconvolution.wdl` into a Terra workspace. All WDL s
 
 `gtf` is a GTF or GTF.GZ file. It needs `gene` records with `gene_id` and `gene_name`. No gene-type filter is applied. The workflow trims surrounding white space before identifier matching. Matching is otherwise exact.
 
-The workflow does not have an expression-preparation task. dtangle maps BED gene IDs with the GTF and applies `log2()` once. Its view uses gene symbols and sums linear CPM for duplicated symbols. TCA reads every valid nonconstant gene from the BED and applies `log2()` once. Its view keeps mapped input `gene_id` rows, coordinates, and row order. Rows that share a gene symbol stay separate.
+The workflow does not have an expression-preparation task. dtangle maps BED gene IDs with the GTF and applies `log2()` once. Its view uses gene symbols and sums linear CPM for duplicated symbols. TCA reads every valid nonconstant gene from the BED and applies `log2()` once. TCA does not use the GTF. Its view keeps each valid input `gene_id`, with its coordinates and row order. Rows that share a gene symbol stay separate.
 
 ## Select a proportion mode
 
@@ -41,13 +41,13 @@ The workflow combines the 22 LM22 types into ten groups:
 
 T follicular helper and regulatory T cells are in CD4 T cells. Gamma-delta T cells stay separate. A group is retained only when its cohort mean is at least `0.0001` (0.01%). No group is forced to remain. Retained exact zeros use `zero_floor`, then each sample row is normalized to one.
 
-TCA fits one full-matrix model with `refit_W = FALSE`. It uses mapped, nonconstant genes from the complete `log2(CPM)` TCA matrix. It does not use only LM22-shared genes. Optional covariates are mixture-level technical covariates.
+TCA fits one full-matrix model with `refit_W = FALSE`. It uses every valid, nonconstant gene from the direct BED in the complete `log2(CPM)` TCA matrix. It does not use only LM22-shared genes. Optional covariates are mixture-level technical covariates.
 
 ## Resources and outputs
 
 Default resources support an initial whole-blood run of about 9,000 samples. TCA fitting uses 16 CPU, 192 GB memory, and 750 GB disk by default. Direct BED export uses 8 CPU, 128 GB memory, and 500 GB disk by default. `preemptible_attempts` and `max_retries` are global controls. They apply to every task. Change runtime inputs only after you inspect cohort size and storage needs.
 
-The workflow does one direct tensor extraction. It writes one BED.GZ file per retained major cell group. Each file uses the `log2_cpm` model scale. It preserves `#chr`, `start`, `end`, `gene_id`, modeled-gene order, and sample-column order. It excludes unmapped and constant genes. The values are statistical TCA estimates. They are not counts, linear CPM, or absolute expression values.
+The workflow does one direct tensor extraction. It writes one BED.GZ file per retained major cell group. Each file uses the `log2_cpm` model scale. It preserves `#chr`, `start`, `end`, `gene_id`, modeled-gene order, and sample-column order. It excludes genes that are constant before fitting. The values are statistical TCA estimates. They are not counts, linear CPM, or absolute expression values.
 
 The workflow writes proportions, filter reports, the fitted TCA model, a BED inventory, reconstruction quality control, logs, an output inventory, and a machine-readable manifest. `cell_type_beds` is the authoritative file array. Public inventories and the manifest use stable BED basenames, so task-localized paths do not leak into metadata. The manifest task keeps localized paths only while it calculates checksums.
 

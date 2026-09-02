@@ -114,8 +114,13 @@ stopifnot(all(is.finite(reconstruction$correlation)))
 stopifnot(all(is.finite(reconstruction$rmse)))
 
 cell_type_beds <- output_value("cell_type_beds")
-stopifnot(length(cell_type_beds) == length(expected_groups))
-purrr::walk(cell_type_beds, function(path) {
+cell_type_bed_paths <- normalizePath(cell_type_beds)
+stopifnot(
+  length(cell_type_bed_paths) == length(expected_groups),
+  all(grepl("[.]bed[.]gz$", cell_type_bed_paths)),
+  anyDuplicated(cell_type_bed_paths) == 0L
+)
+purrr::walk(cell_type_bed_paths, function(path) {
   bed <- readr::read_tsv(
     path,
     col_types = readr::cols(.default = readr::col_character()),
@@ -142,6 +147,7 @@ inventory <- readr::read_tsv(
   show_col_types = FALSE,
   progress = FALSE
 )
+inventory_paths <- normalizePath(inventory$path)
 stopifnot(
   nrow(inventory) == length(expected_groups),
   all(inventory$n_genes == length(expected_gene_ids)),
@@ -150,7 +156,9 @@ stopifnot(
   setequal(inventory$cell_group, expected_groups),
   all(nzchar(inventory$slug)),
   anyDuplicated(inventory$slug) == 0L,
-  setequal(normalizePath(cell_type_beds), normalizePath(inventory$path))
+  all(grepl("[.]bed[.]gz$", inventory_paths)),
+  anyDuplicated(inventory_paths) == 0L,
+  setequal(cell_type_bed_paths, inventory_paths)
 )
 
 manifest <- jsonlite::read_json(

@@ -24,6 +24,21 @@ testthat::test_that("smoke fixture is BED and contains a duplicate gene symbol",
   testthat::expect_true(anyDuplicated(mapped) > 0L)
 })
 
+testthat::test_that("smoke assertions require unique compressed BED paths", {
+  smoke_assertions <- paste(
+    readLines(testthat::test_path("..", "smoke", "assert_outputs.R")),
+    collapse = "\n"
+  )
+  purrr::walk(c(
+    "cell_type_bed_paths <- normalizePath(cell_type_beds)",
+    "inventory_paths <- normalizePath(inventory$path)",
+    "all(grepl(\"[.]bed[.]gz$\", cell_type_bed_paths))",
+    "anyDuplicated(cell_type_bed_paths) == 0L",
+    "all(grepl(\"[.]bed[.]gz$\", inventory_paths))",
+    "anyDuplicated(inventory_paths) == 0L"
+  ), ~ testthat::expect_match(smoke_assertions, .x, fixed = TRUE))
+})
+
 expect_task_contract <- function(path, task, inputs, outputs, defaults) {
   text <- wdl_text(path)
   testthat::expect_match(text, paste0("task ", task))

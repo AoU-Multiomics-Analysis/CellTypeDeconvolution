@@ -1,4 +1,7 @@
 version: 1.2
 workflows:
-  - subclass: WDL 
-    primaryDescriptorPath: <Path> 
+  - subclass: WDL
+    primaryDescriptorPath: /workflows/cell_type_deconvolution.wdl
+    testParameterFiles:
+      - /tests/fixtures/dtangle.inputs.json
+    name: cell-type-deconvolution

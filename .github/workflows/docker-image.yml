@@ -3,12 +3,13 @@ name: Docker Image CI
 on:
   workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
     paths:
       - ".github/workflows/docker-image.yml"
       - "envs/Dockerfile"
+      - "envs/environment.yml"
+      - "R/**"
       - "scripts/**"
-
 
 jobs:
   build_and_push:
@@ -25,20 +26,27 @@ jobs:
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
-          username: ${{github.repository_owner}}
+          username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,prefix=sha-,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created={{commit_date 'YYYY-MM-DDTHH:mm:ss.SSS[Z]'}}
 
       - name: Build and push docker containers
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./envs/Dockerfile
-          push: False 
-          tags: |
-            ${{ steps.meta.outputs.tags }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

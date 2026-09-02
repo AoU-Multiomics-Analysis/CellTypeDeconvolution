@@ -24,6 +24,7 @@ run_build_manifest <- function() {
       "--mapping-report",
       dest = "mapping_report",
       type = "character",
+      default = NULL,
       help = "Gene mapping report TSV from expression preparation."
     ),
     optparse::make_option(
@@ -72,6 +73,7 @@ run_build_manifest <- function() {
       "--pipeline-version",
       dest = "pipeline_version",
       type = "character",
+      default = NULL,
       help = "Pipeline version."
     ),
     optparse::make_option(
@@ -117,9 +119,9 @@ run_build_manifest <- function() {
     option_list = option_list
   ))
   required_options <- c(
-    "outputs", "export_qc_summary", "mapping_report",
+    "outputs", "export_qc_summary",
     "original_proportions", "combined_proportions", "tca_weights",
-    "filter_report", "model", "model_log", "pipeline_version",
+    "filter_report", "model", "model_log",
     "container_image", "output", "qc_output"
   )
   missing_options <- required_options[vapply(
@@ -163,12 +165,17 @@ run_build_manifest <- function() {
     show_col_types = FALSE,
     progress = FALSE
   )
-  mapping_report <- readr::read_tsv(
-    options$mapping_report,
-    col_types = readr::cols(.default = readr::col_character()),
-    show_col_types = FALSE,
-    progress = FALSE
-  )
+  mapping_report <- if (is.null(options$mapping_report) ||
+      !nzchar(options$mapping_report)) {
+    NULL
+  } else {
+    readr::read_tsv(
+      options$mapping_report,
+      col_types = readr::cols(.default = readr::col_character()),
+      show_col_types = FALSE,
+      progress = FALSE
+    )
+  }
   original_proportions <- read_numeric_matrix(
     options$original_proportions,
     "sample_id"

@@ -224,6 +224,31 @@ testthat::test_that("manifest records hashes, dimensions, and provenance", {
   testthat::expect_match(manifest$outputs[[1L]]$sha256, "^[0-9a-f]{64}$")
 })
 
+testthat::test_that("manifest omits absent pipeline provenance", {
+  output_path <- tempfile(fileext = ".bed.gz")
+  writeBin(charToRaw("bed-output"), output_path)
+  outputs <- tibble::tibble(
+    logical_name = "cd4_t_cells_expression",
+    path = output_path,
+    n_genes = 2L,
+    n_samples = 3L,
+    scale = "log2_cpm",
+    cell_group = "CD4 T cells"
+  )
+
+  manifest <- build_output_manifest(
+    outputs = outputs,
+    tca_version = "1.2.1",
+    parameters = list(scale = "log2_cpm"),
+    container_image = paste0(
+      "example.org/pipeline@sha256:",
+      paste(rep("a", 64L), collapse = "")
+    )
+  )
+
+  testthat::expect_false("pipeline_version" %in% names(manifest))
+})
+
 testthat::test_that("manifest metadata rejects empty fields and fractional dimensions", {
   output_path <- tempfile(fileext = ".bed.gz")
   writeBin(charToRaw("bed-output"), output_path)
@@ -249,7 +274,7 @@ testthat::test_that("manifest metadata rejects empty fields and fractional dimen
   )
 })
 
-testthat::test_that("manifest provenance accepts only digests or the exact smoke tag", {
+testthat::test_that("manifest provenance accepts digests and approved image tags", {
   testthat::expect_true(exists("validate_container_image", mode = "function"))
   if (!exists("validate_container_image", mode = "function")) {
     return(invisible(NULL))
@@ -262,6 +287,12 @@ testthat::test_that("manifest provenance accepts only digests or the exact smoke
   testthat::expect_identical(
     validate_container_image("celltype-deconvolution:test"),
     "celltype-deconvolution:test"
+  )
+  testthat::expect_identical(
+    validate_container_image(
+      "ghcr.io/aou-multiomics-analysis/celltypedeconvolution:latest"
+    ),
+    "ghcr.io/aou-multiomics-analysis/celltypedeconvolution:latest"
   )
   purrr::walk(
     c(
@@ -393,6 +424,25 @@ testthat::test_that("pipeline QC records validation, row sums, duplicates, and c
   testthat::expect_equal(metric_value[["tca_max_internal_iterations"]], 10)
   testthat::expect_identical(metric_status[["tca_convergence"]], "converged")
   testthat::expect_equal(metric_value[["tca_tau_hat"]], 0.25)
+
+  summary_without_mapping <- build_pipeline_qc_summary(
+    export_summary = export_summary,
+    original_proportions = original,
+    combined_proportions = combined,
+    tca_weights = weights,
+    filter_report = filter_report,
+    tca_model = model,
+    tca_log_lines = tca_log,
+    dtangle_metadata = dtangle_metadata
+  )
+
+  testthat::expect_false(
+    "duplicate_gene_symbol_input_row_count" %in%
+      summary_without_mapping$metric
+  )
+  testthat::expect_false(
+    "duplicate_gene_symbol_count" %in% summary_without_mapping$metric
+  )
 })
 
 testthat::test_that("manifest CLI hashes localized files and publishes basenames", {
@@ -496,6 +546,20 @@ testthat::test_that("manifest CLI hashes localized files and publishes basenames
   testthat::expect_true(all(c(
     "duplicate_gene_symbol_count", "tca_convergence"
   ) %in% final_qc$metric))
+
+  optional_arguments <- arguments[!(arguments %in% c(
+    "--mapping-report", mapping_path, "--pipeline-version", "test"
+  ))]
+  status <- system2("Rscript", shQuote(optional_arguments))
+
+  testthat::expect_identical(status, 0L)
+  manifest <- jsonlite::read_json(manifest_path, simplifyVector = FALSE)
+  testthat::expect_false("pipeline_version" %in% names(manifest))
+  final_qc <- readr::read_tsv(qc_path, show_col_types = FALSE)
+  testthat::expect_false(
+    "duplicate_gene_symbol_input_row_count" %in% final_qc$metric
+  )
+  testthat::expect_false("duplicate_gene_symbol_count" %in% final_qc$metric)
 })
 
 testthat::test_that("QC plots use a minimal theme without titles", {

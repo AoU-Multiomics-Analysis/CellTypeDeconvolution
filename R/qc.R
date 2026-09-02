@@ -313,14 +313,14 @@ parse_tca_convergence <- function(tca_log_lines) {
 
 build_pipeline_qc_summary <- function(
     export_summary,
-    mapping_report,
     original_proportions,
     combined_proportions,
     tca_weights,
     filter_report,
     tca_model,
     tca_log_lines,
-    dtangle_metadata = NULL) {
+    dtangle_metadata = NULL,
+    mapping_report = NULL) {
   if (!inherits(export_summary, "data.frame") ||
       !all(c("metric", "value") %in% names(export_summary)) ||
       nrow(export_summary) == 0L || anyNA(export_summary$metric) ||
@@ -328,9 +328,10 @@ build_pipeline_qc_summary <- function(
       anyDuplicated(export_summary$metric) > 0L) {
     stop("export_summary must contain unique metric and value columns", call. = FALSE)
   }
-  if (!inherits(mapping_report, "data.frame") ||
-      !all(c("gene_id", "gene_name", "mapping_action") %in%
-        names(mapping_report))) {
+  if (!is.null(mapping_report) &&
+      (!inherits(mapping_report, "data.frame") ||
+        !all(c("gene_id", "gene_name", "mapping_action") %in%
+          names(mapping_report)))) {
     stop("mapping_report is missing required mapping columns", call. = FALSE)
   }
   matrices <- list(
@@ -377,13 +378,25 @@ build_pipeline_qc_summary <- function(
     stop("TCA model must contain one finite tau_hat value", call. = FALSE)
   }
   convergence <- parse_tca_convergence(tca_log_lines)
-  duplicate_action <-
-    mapping_report$mapping_action ==
-    "duplicate_gene_name_aggregated_for_dtangle"
-  duplicate_gene_names <- unique(mapping_report$gene_name[
-    duplicate_action & !is.na(mapping_report$gene_name) &
-      nzchar(mapping_report$gene_name)
-  ])
+  mapping_summary <- if (is.null(mapping_report)) {
+    tibble::tibble()
+  } else {
+    duplicate_action <-
+      mapping_report$mapping_action ==
+      "duplicate_gene_name_aggregated_for_dtangle"
+    duplicate_gene_names <- unique(mapping_report$gene_name[
+      duplicate_action & !is.na(mapping_report$gene_name) &
+        nzchar(mapping_report$gene_name)
+    ])
+    tibble::tibble(
+      metric = c(
+        "duplicate_gene_symbol_input_row_count",
+        "duplicate_gene_symbol_count"
+      ),
+      value = c(sum(duplicate_action), length(duplicate_gene_names)),
+      status = "passed"
+    )
+  }
   base_summary <- tibble::as_tibble(export_summary) |>
     dplyr::transmute(
       metric = as.character(.data$metric),
@@ -397,8 +410,6 @@ build_pipeline_qc_summary <- function(
       "adjusted_weight_max_row_sum_error",
       "normalization_adjustment_max_abs",
       "zero_values_adjusted",
-      "duplicate_gene_symbol_input_row_count",
-      "duplicate_gene_symbol_count",
       "tca_internal_iterations",
       "tca_max_internal_iterations",
       "tca_convergence",
@@ -410,15 +421,13 @@ build_pipeline_qc_summary <- function(
       max(abs(rowSums(tca_weights) - 1)),
       max(abs(tca_weights - adjusted_before_normalization)),
       sum(retained_report$zero_count_before),
-      sum(duplicate_action),
-      length(duplicate_gene_names),
       convergence$iterations,
       convergence$maximum_iterations,
       as.numeric(convergence$converged),
       tca_model$tau_hat
     ),
     status = c(
-      rep("passed", 9L),
+      rep("passed", 7L),
       convergence$status,
       "fitted"
     )
@@ -459,7 +468,7 @@ build_pipeline_qc_summary <- function(
       status = "passed"
     )
   }
-  dplyr::bind_rows(base_summary, lm22_status, proportion_summary)
+  dplyr::bind_rows(base_summary, lm22_status, mapping_summary, proportion_summary)
 }
 
 validate_manifest_outputs <- function(outputs) {
@@ -511,16 +520,18 @@ validate_manifest_outputs <- function(outputs) {
 
 validate_container_image <- function(container_image) {
   local_smoke_image <- "celltype-deconvolution:test"
+  default_image <- "ghcr.io/aou-multiomics-analysis/celltypedeconvolution:latest"
   digest_pattern <- "^[^[:space:]@]+@sha256:[0-9a-f]{64}$"
   valid <- is.character(container_image) && length(container_image) == 1L &&
     !is.na(container_image) &&
     (identical(container_image, local_smoke_image) ||
+      identical(container_image, default_image) ||
       grepl(digest_pattern, container_image))
   if (!valid) {
     stop(
       paste0(
-        "container_image must use an immutable SHA-256 digest or equal ",
-        "celltype-deconvolution:test for local smoke CI"
+        "container_image must use an immutable SHA-256 digest or equal an ",
+        "approved local smoke or GitHub default image"
       ),
       call. = FALSE
     )
@@ -530,10 +541,10 @@ validate_container_image <- function(container_image) {
 
 build_output_manifest <- function(
     outputs,
-    pipeline_version,
     tca_version,
     parameters,
-    container_image) {
+    container_image,
+    pipeline_version = NULL) {
   outputs <- validate_manifest_outputs(outputs)
   if (!requireNamespace("digest", quietly = TRUE)) {
     stop("The digest package is required for SHA-256 checksums", call. = FALSE)
@@ -564,14 +575,13 @@ build_output_manifest <- function(
       cell_group = as.character(cell_group)
     )
   })
-  list(
+  manifest <- list(
     schema_version = "1.0",
     created_utc = format(
       Sys.time(),
       "%Y-%m-%dT%H:%M:%SZ",
       tz = "UTC"
     ),
-    pipeline_version = pipeline_version,
     tca_version = tca_version,
     software_versions = list(
       R = as.character(getRversion()),
@@ -581,6 +591,11 @@ build_output_manifest <- function(
     container_image = container_image,
     outputs = output_entries
   )
+  if (is.character(pipeline_version) && length(pipeline_version) == 1L &&
+      !is.na(pipeline_version) && nzchar(pipeline_version)) {
+    manifest$pipeline_version <- pipeline_version
+  }
+  manifest
 }
 
 write_output_manifest <- function(path, manifest) {

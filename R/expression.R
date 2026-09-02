@@ -1,276 +1,221 @@
-validate_expression_matrix <- function(expression) {
-  if (!is.matrix(expression) || !is.numeric(expression)) {
-    stop("expression must be a numeric matrix", call. = FALSE)
+validate_cpm_matrix <- function(cpm) {
+  if (!is.matrix(cpm) || !is.numeric(cpm)) {
+    stop("cpm must be a numeric matrix", call. = FALSE)
   }
-  if (nrow(expression) == 0L || ncol(expression) == 0L) {
-    stop("expression must contain at least one gene and one sample", call. = FALSE)
+  if (nrow(cpm) == 0L || ncol(cpm) == 0L) {
+    stop("cpm must contain at least one gene and one sample", call. = FALSE)
   }
-  if (is.null(rownames(expression)) || anyNA(rownames(expression)) ||
-      any(!nzchar(rownames(expression)))) {
-    stop("gene identifiers must be non-missing and non-empty", call. = FALSE)
-  }
-  if (anyDuplicated(rownames(expression)) > 0L) {
-    stop("gene identifiers must be unique", call. = FALSE)
-  }
-  if (is.null(colnames(expression)) || anyNA(colnames(expression)) ||
-      any(!nzchar(colnames(expression)))) {
-    stop("sample identifiers must be non-missing and non-empty", call. = FALSE)
-  }
-  if (anyDuplicated(colnames(expression)) > 0L) {
-    stop("sample identifiers must be unique", call. = FALSE)
-  }
-  if (any(!is.finite(expression))) {
-    stop("expression values must be finite", call. = FALSE)
-  }
-  if (any(expression < 0)) {
-    stop("expression values must be nonnegative", call. = FALSE)
+  if (is.null(rownames(cpm)) || anyNA(rownames(cpm))) {
+    stop("CPM gene identifiers must be non-missing", call. = FALSE)
   }
 
-  invisible(TRUE)
+  gene_ids <- trimws(rownames(cpm))
+  if (any(!nzchar(gene_ids))) {
+    stop("CPM gene identifiers must be non-empty", call. = FALSE)
+  }
+  if (anyDuplicated(gene_ids) > 0L) {
+    stop("CPM gene identifiers must be unique after trimming", call. = FALSE)
+  }
+  if (is.null(colnames(cpm)) || anyNA(colnames(cpm)) ||
+      any(!nzchar(colnames(cpm)))) {
+    stop("CPM sample identifiers must be non-missing and non-empty", call. = FALSE)
+  }
+  if (anyDuplicated(colnames(cpm)) > 0L) {
+    stop("CPM sample identifiers must be unique", call. = FALSE)
+  }
+  if (any(!is.finite(cpm))) {
+    stop("CPM values must be finite", call. = FALSE)
+  }
+
+  rownames(cpm) <- gene_ids
+  cpm
 }
 
-validate_annotation <- function(annotation) {
-  if (!inherits(annotation, "data.frame")) {
-    stop("annotation must be a data frame", call. = FALSE)
+extract_gtf_attribute <- function(attributes, key) {
+  if (!is.character(key) || length(key) != 1L || is.na(key) || !nzchar(key)) {
+    stop("key must be one non-missing, non-empty character value", call. = FALSE)
   }
-  required_columns <- c("gene_id", "gene_symbol")
+
+  pattern <- paste0("(?:^|;)[[:space:]]*", key,
+    "[[:space:]]+\\\"([^\\\"]+)\\\"")
+  stringr::str_match(attributes, pattern)[, 2L]
+}
+
+validate_gtf_gene_annotation <- function(annotation) {
+  if (!inherits(annotation, "data.frame")) {
+    stop("GTF annotation must be a data frame", call. = FALSE)
+  }
+
+  required_columns <- c("gene_id", "gene_name", "gene_type")
   missing_columns <- setdiff(required_columns, names(annotation))
   if (length(missing_columns) > 0L) {
     stop(
       sprintf(
-        "annotation is missing required columns: %s",
+        "GTF annotation is missing required columns: %s",
         paste(missing_columns, collapse = ", ")
       ),
       call. = FALSE
     )
   }
 
-  annotation <- tibble::as_tibble(annotation)
-  annotation$gene_id <- as.character(annotation$gene_id)
-  annotation$gene_symbol <- trimws(as.character(annotation$gene_symbol))
+  annotation <- tibble::as_tibble(annotation) |>
+    dplyr::transmute(
+      gene_id = trimws(as.character(.data$gene_id)),
+      gene_name = trimws(as.character(.data$gene_name)),
+      gene_type = trimws(as.character(.data$gene_type))
+    )
+  if (nrow(annotation) == 0L) {
+    stop("GTF annotation must contain at least one gene record", call. = FALSE)
+  }
   if (anyNA(annotation$gene_id) || any(!nzchar(annotation$gene_id))) {
-    stop("annotation gene_id values must be non-missing and non-empty", call. = FALSE)
+    stop("GTF annotation gene_id values must be non-missing and non-empty", call. = FALSE)
   }
   if (anyDuplicated(annotation$gene_id) > 0L) {
-    stop("annotation gene_id values must be unique", call. = FALSE)
+    stop("GTF annotation gene_id values must be unique", call. = FALSE)
+  }
+  if (!any(!is.na(annotation$gene_name) & nzchar(annotation$gene_name))) {
+    stop("GTF annotation must contain at least one usable gene_name", call. = FALSE)
   }
 
   annotation
 }
 
-read_optional_annotation <- function(path) {
-  if (is.null(path) || identical(path, "")) {
-    return(NULL)
-  }
-  if (!is.character(path) || length(path) != 1L || is.na(path)) {
-    stop("annotation path must be one non-missing character value", call. = FALSE)
+read_gtf_gene_annotation <- function(path, chunk_size = 100000L) {
+  if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)) {
+    stop("GTF path must be one non-missing, non-empty character value", call. = FALSE)
   }
   if (!file.exists(path)) {
-    stop(sprintf("Annotation file does not exist: %s", path), call. = FALSE)
+    stop(sprintf("GTF file does not exist: %s", path), call. = FALSE)
+  }
+  if (!is.numeric(chunk_size) || length(chunk_size) != 1L || is.na(chunk_size) ||
+      !is.finite(chunk_size) || chunk_size < 1L || chunk_size != as.integer(chunk_size)) {
+    stop("chunk_size must be a positive integer", call. = FALSE)
   }
 
-  annotation <- readr::read_tsv(
-    path,
-    name_repair = "minimal",
-    progress = FALSE,
-    show_col_types = FALSE
-  )
-  validate_annotation(annotation)
+  connection <- if (grepl("[.]gz$", path, ignore.case = TRUE)) {
+    gzfile(path, "rt")
+  } else {
+    file(path, "rt")
+  }
+  on.exit(close(connection), add = TRUE)
+
+  gene_rows <- list()
+  chunk_index <- 0L
+  repeat {
+    lines <- readLines(connection, n = as.integer(chunk_size), warn = FALSE)
+    if (length(lines) == 0L) {
+      break
+    }
+
+    records <- lines[!startsWith(trimws(lines), "#")]
+    if (length(records) == 0L) {
+      next
+    }
+    fields_by_record <- strsplit(records, "\t", fixed = TRUE)
+    field_counts <- lengths(fields_by_record)
+    if (any(field_counts != 9L)) {
+      stop("Each non-comment GTF record must contain nine tab-separated fields", call. = FALSE)
+    }
+    fields <- do.call(rbind, fields_by_record)
+    is_gene <- fields[, 3L] == "gene"
+    if (!any(is_gene)) {
+      next
+    }
+
+    gene_fields <- fields[is_gene, , drop = FALSE]
+    chunk_index <- chunk_index + 1L
+    gene_rows[[chunk_index]] <- tibble::tibble(
+      gene_id = extract_gtf_attribute(gene_fields[, 9L], "gene_id"),
+      gene_name = extract_gtf_attribute(gene_fields[, 9L], "gene_name"),
+      gene_type = dplyr::coalesce(
+        extract_gtf_attribute(gene_fields[, 9L], "gene_type"),
+        extract_gtf_attribute(gene_fields[, 9L], "gene_biotype")
+      )
+    )
+  }
+
+  if (length(gene_rows) == 0L) {
+    stop("GTF annotation must contain at least one gene record", call. = FALSE)
+  }
+  validate_gtf_gene_annotation(dplyr::bind_rows(gene_rows))
 }
 
-counts_to_tpm <- function(counts, gene_length_bp) {
-  validate_expression_matrix(counts)
-  if (!identical(rownames(counts), names(gene_length_bp))) {
-    stop("gene_length_bp names must exactly match count gene identifiers", call. = FALSE)
-  }
-  if (any(!is.finite(gene_length_bp)) || any(gene_length_bp <= 0)) {
-    stop("Count input requires positive gene_length_bp values", call. = FALSE)
-  }
-
-  rates <- counts / (gene_length_bp / 1000)
-  totals <- colSums(rates)
-  if (any(totals <= 0)) {
-    stop("Each sample must have a positive total expression rate.", call. = FALSE)
-  }
-  tpm <- sweep(rates, 2, totals, "/") * 1e6
-  dimnames(tpm) <- dimnames(counts)
-  tpm
-}
-
-collapse_to_symbols <- function(values, annotation) {
-  validate_expression_matrix(values)
-  annotation <- validate_annotation(annotation)
-  selected_annotation <- annotation |>
-    dplyr::filter(.data$gene_id %in% rownames(values)) |>
-    dplyr::filter(!is.na(.data$gene_symbol), nzchar(.data$gene_symbol)) |>
-    dplyr::select("gene_id", "gene_symbol")
-
-  if (nrow(selected_annotation) == 0L) {
+collapse_cpm_to_gene_names <- function(cpm, annotation) {
+  cpm <- validate_cpm_matrix(cpm)
+  annotation <- validate_gtf_gene_annotation(annotation)
+  mapped_annotation <- annotation |>
+    dplyr::filter(.data$gene_id %in% rownames(cpm)) |>
+    dplyr::filter(!is.na(.data$gene_name), nzchar(.data$gene_name)) |>
+    dplyr::select("gene_id", "gene_name")
+  if (nrow(mapped_annotation) == 0L) {
     return(matrix(
       numeric(),
       nrow = 0L,
-      ncol = ncol(values),
-      dimnames = list(character(), colnames(values))
+      ncol = ncol(cpm),
+      dimnames = list(character(), colnames(cpm))
     ))
   }
 
-  collapsed <- tibble::as_tibble(values, rownames = "gene_id") |>
-    tidyr::pivot_longer(
-      cols = -"gene_id",
-      names_to = "sample_id",
-      values_to = "value"
-    ) |>
-    dplyr::inner_join(selected_annotation, by = "gene_id") |>
-    dplyr::group_by(.data$gene_symbol, .data$sample_id) |>
-    dplyr::summarise(value = sum(.data$value), .groups = "drop") |>
-    dplyr::arrange(.data$gene_symbol) |>
-    tidyr::pivot_wider(names_from = "sample_id", values_from = "value") |>
-    dplyr::arrange(.data$gene_symbol) |>
-    dplyr::select("gene_symbol", dplyr::all_of(colnames(values)))
+  collapsed <- tibble::as_tibble(cpm, rownames = "gene_id") |>
+    tidyr::pivot_longer(-"gene_id", names_to = "sample_id", values_to = "cpm") |>
+    dplyr::inner_join(mapped_annotation, by = "gene_id") |>
+    dplyr::group_by(.data$gene_name, .data$sample_id) |>
+    dplyr::summarise(cpm = sum(.data$cpm), .groups = "drop") |>
+    tidyr::pivot_wider(names_from = "sample_id", values_from = "cpm") |>
+    dplyr::select("gene_name", dplyr::all_of(colnames(cpm)))
 
-  output <- as.matrix(dplyr::select(collapsed, -"gene_symbol"))
+  output <- as.matrix(dplyr::select(collapsed, -"gene_name"))
   storage.mode(output) <- "double"
-  rownames(output) <- collapsed$gene_symbol
+  rownames(output) <- collapsed$gene_name
   output
 }
 
-normalise_tpm <- function(values) {
-  totals <- colSums(values)
-  if (any(totals <= 0)) {
-    stop("Each sample must have a positive total TPM.", call. = FALSE)
-  }
-  output <- sweep(values, 2, totals, "/") * 1e6
-  dimnames(output) <- dimnames(values)
-  output
-}
+make_cpm_mapping_report <- function(cpm, annotation) {
+  matching_indices <- match(rownames(cpm), annotation$gene_id)
+  gene_names <- annotation$gene_name[matching_indices]
+  usable_gene_names <- !is.na(gene_names) & nzchar(gene_names)
+  duplicate_gene_names <- usable_gene_names &
+    (duplicated(gene_names) | duplicated(gene_names, fromLast = TRUE))
 
-annotation_for_expression <- function(expression, annotation, expression_type) {
-  if (is.null(annotation)) {
-    if (identical(expression_type, "counts")) {
-      stop("Count input requires annotation with gene lengths", call. = FALSE)
-    }
-    return(tibble::tibble(
-      gene_id = rownames(expression),
-      gene_symbol = rownames(expression),
-      mapping_action = "input_identifier_retained"
-    ))
-  }
-
-  annotation <- validate_annotation(annotation)
-  if (identical(expression_type, "counts")) {
-    if (!("gene_length_bp" %in% names(annotation))) {
-      stop("Count input requires a gene_length_bp annotation column", call. = FALSE)
-    }
-    annotation$gene_length_bp <- suppressWarnings(as.numeric(annotation$gene_length_bp))
-    matching_annotation <- annotation[match(rownames(expression), annotation$gene_id), , drop = FALSE]
-    missing_genes <- rownames(expression)[is.na(matching_annotation$gene_id)]
-    if (length(missing_genes) > 0L) {
-      stop(
-        sprintf(
-          "gene_length_bp is missing for gene_id: %s",
-          paste(missing_genes, collapse = ", ")
-        ),
-        call. = FALSE
-      )
-    }
-    if (any(!is.finite(matching_annotation$gene_length_bp)) ||
-        any(matching_annotation$gene_length_bp <= 0)) {
-      stop("Count input requires positive gene_length_bp values", call. = FALSE)
-    }
-  }
-
-  matching_indices <- match(rownames(expression), annotation$gene_id)
-  matching_annotation <- annotation[matching_indices, , drop = FALSE]
-  missing_annotation <- is.na(matching_indices)
-  if (any(missing_annotation)) {
-    matching_annotation$gene_id[missing_annotation] <-
-      rownames(expression)[missing_annotation]
-    matching_annotation$gene_symbol[missing_annotation] <- NA_character_
-  }
-  matching_annotation
-}
-
-make_mapping_report <- function(expression, annotation) {
-  if (is.null(annotation)) {
-    return(tibble::tibble(
-      gene_id = rownames(expression),
-      gene_symbol = rownames(expression),
-      mapping_action = "input_identifier_retained"
-    ))
-  }
-
-  symbols <- annotation$gene_symbol
-  duplicate_symbols <- !is.na(symbols) & nzchar(symbols) &
-    (duplicated(symbols) | duplicated(symbols, fromLast = TRUE))
   tibble::tibble(
-    gene_id = annotation$gene_id,
-    gene_symbol = dplyr::na_if(annotation$gene_symbol, ""),
+    gene_id = rownames(cpm),
+    gene_name = gene_names,
     mapping_action = dplyr::case_when(
-      is.na(symbols) | !nzchar(symbols) ~ "unmapped",
-      duplicate_symbols ~ "duplicate_symbol_collapsed",
+      is.na(matching_indices) ~ "missing_gtf_gene_id",
+      !usable_gene_names ~ "missing_gene_name",
+      duplicate_gene_names ~ "duplicate_gene_name_collapsed",
       TRUE ~ "mapped"
     )
-  ) |>
-    dplyr::arrange(.data$gene_id)
+  )
 }
 
-make_excluded_report <- function(mapping_report, tpm) {
-  unmapped <- mapping_report |>
-    dplyr::filter(.data$mapping_action == "unmapped") |>
+make_excluded_genes <- function(mapping_report) {
+  mapping_report |>
+    dplyr::filter(!(.data$mapping_action %in% c(
+      "mapped", "duplicate_gene_name_collapsed"
+    ))) |>
     dplyr::transmute(
       gene_id = .data$gene_id,
-      gene_symbol = .data$gene_symbol,
-      reason = "unmapped_gene_symbol"
+      gene_name = .data$gene_name,
+      reason = .data$mapping_action
     )
-  constant_rows <- apply(tpm, 1L, function(values) {
-    length(unique(values)) == 1L
-  })
-  constants <- tibble::tibble(
-    gene_id = rownames(tpm)[constant_rows],
-    gene_symbol = rownames(tpm)[constant_rows],
-    reason = "constant_expression"
-  )
-
-  dplyr::bind_rows(unmapped, constants) |>
-    dplyr::arrange(.data$gene_id, .data$reason)
 }
 
-prepare_expression <- function(expression, expression_type, annotation = NULL) {
-  validate_expression_matrix(expression)
-  if (!is.character(expression_type) || length(expression_type) != 1L ||
-      is.na(expression_type) || !(expression_type %in% c("counts", "tpm"))) {
-    stop("expression_type must be 'counts' or 'tpm'", call. = FALSE)
-  }
+prepare_expression <- function(cpm, annotation) {
+  cpm <- validate_cpm_matrix(cpm)
+  annotation <- validate_gtf_gene_annotation(annotation)
+  mapping_report <- make_cpm_mapping_report(cpm, annotation)
+  prepared_cpm <- collapse_cpm_to_gene_names(cpm, annotation)
 
-  expression_annotation <- annotation_for_expression(
-    expression,
-    annotation,
-    expression_type
-  )
-  if (identical(expression_type, "counts")) {
-    gene_lengths <- expression_annotation$gene_length_bp
-    names(gene_lengths) <- expression_annotation$gene_id
-    tpm <- counts_to_tpm(expression, gene_lengths)
-  } else {
-    tpm <- expression
+  if (nrow(prepared_cpm) == 0L || anyNA(prepared_cpm) ||
+      any(!is.finite(prepared_cpm)) || any(prepared_cpm <= 0)) {
+    stop("prepared CPM must be finite and strictly positive", call. = FALSE)
   }
-
-  mapping_report <- make_mapping_report(
-    expression,
-    if (is.null(annotation)) NULL else expression_annotation
-  )
-  if (is.null(annotation)) {
-    tpm <- tpm[sort(rownames(tpm)), , drop = FALSE]
-  } else {
-    tpm <- collapse_to_symbols(tpm, expression_annotation)
-  }
-  tpm <- normalise_tpm(tpm)
-  excluded_genes <- make_excluded_report(mapping_report, tpm)
 
   list(
-    tpm = tpm,
-    log_expression = log2(tpm + 1),
+    cpm = prepared_cpm,
+    log_expression = log2(prepared_cpm),
     mapping_report = mapping_report,
-    excluded_genes = excluded_genes
+    excluded_genes = make_excluded_genes(mapping_report)
   )
 }

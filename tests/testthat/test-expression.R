@@ -1,189 +1,127 @@
 source(testthat::test_path("helper-load.R"), local = .GlobalEnv)
 source(testthat::test_path("../..", "R", "expression.R"), local = .GlobalEnv)
 
-testthat::test_that("counts convert to TPM by gene length", {
-  counts <- matrix(
-    c(100, 100, 200, 100),
-    nrow = 2,
-    dimnames = list(c("g1", "g2"), c("s1", "s2"))
-  )
+testthat::test_that("GTF parsing retains all gene types and ignores non-gene records", {
+  gtf <- tempfile(fileext = ".gtf")
+  writeLines(c(
+    "1\tsrc\tgene\t1\t10\t.\t+\t.\tgene_id \"g1\"; gene_name \"A\"; gene_type \"protein_coding\";",
+    "1\tsrc\tgene\t20\t30\t.\t+\t.\tgene_id \"g2\"; gene_name \"B\"; gene_type \"lncRNA\";",
+    "1\tsrc\ttranscript\t1\t10\t.\t+\t.\tgene_id \"g1\"; gene_name \"A\";"
+  ), gtf)
 
-  observed <- counts_to_tpm(counts, c(g1 = 1000, g2 = 2000))
+  observed <- read_gtf_gene_annotation(gtf, chunk_size = 1L)
 
-  testthat::expect_equal(colSums(observed), c(s1 = 1e6, s2 = 1e6))
-  testthat::expect_equal(
-    observed[, "s1"],
-    c(g1 = 2 / 3 * 1e6, g2 = 1 / 3 * 1e6)
-  )
+  testthat::expect_identical(observed$gene_id, c("g1", "g2"))
+  testthat::expect_identical(observed$gene_name, c("A", "B"))
+  testthat::expect_identical(observed$gene_type, c("protein_coding", "lncRNA"))
 })
 
-testthat::test_that("count conversion rejects negative values", {
-  counts <- matrix(
-    c(-1, 2),
-    nrow = 2,
-    dimnames = list(c("g1", "g2"), "s1")
-  )
-
-  testthat::expect_error(
-    counts_to_tpm(counts, c(g1 = 1000, g2 = 1000)),
-    "nonnegative"
-  )
-})
-
-testthat::test_that("duplicate symbols are summed and renormalized", {
-  values <- matrix(
-    c(1, 2, 3, 4),
-    nrow = 2,
-    dimnames = list(c("ENSG1", "ENSG2"), c("s1", "s2"))
-  )
+testthat::test_that("duplicate gene names are summed without CPM renormalization", {
+  cpm <- matrix(c(2, 3, 5, 7), nrow = 2,
+    dimnames = list(c("g1", "g2"), c("s1", "s2")))
   annotation <- tibble::tibble(
-    gene_id = c("ENSG1", "ENSG2"),
-    gene_symbol = c("A", "A"),
-    gene_length_bp = c(1000, 1000)
+    gene_id = c("g1", "g2"), gene_name = c("A", "A"), gene_type = c("x", "y")
   )
 
-  observed <- collapse_to_symbols(values, annotation)
+  result <- prepare_expression(cpm, annotation)
 
-  testthat::expect_identical(rownames(observed), "A")
-  testthat::expect_equal(as.numeric(observed), c(3, 7))
-})
-
-testthat::test_that("log expression is log2 TPM plus one", {
-  x <- matrix(
-    c(0, 1e6),
-    nrow = 2,
-    dimnames = list(c("A", "B"), "s1")
-  )
-
-  result <- prepare_expression(x, "tpm")
-
-  testthat::expect_equal(result$log_expression, log2(result$tpm + 1))
-})
-
-testthat::test_that("expression preparation rejects negative values", {
-  x <- matrix(
-    c(-1, 1),
-    nrow = 2,
-    dimnames = list(c("A", "B"), "s1")
-  )
-
-  testthat::expect_error(prepare_expression(x, "tpm"), "nonnegative")
-})
-
-testthat::test_that("count input requires a gene length for every gene", {
-  counts <- matrix(
-    c(1, 2),
-    nrow = 2,
-    dimnames = list(c("g1", "g2"), "s1")
-  )
-  annotation <- tibble::tibble(
-    gene_id = "g1",
-    gene_symbol = "G1",
-    gene_length_bp = 1000
-  )
-
-  testthat::expect_error(
-    prepare_expression(counts, "counts", annotation),
-    "gene_length_bp.*g2"
-  )
-})
-
-testthat::test_that("count input rejects nonpositive gene lengths", {
-  counts <- matrix(1, nrow = 1, dimnames = list("g1", "s1"))
-  annotation <- tibble::tibble(
-    gene_id = "g1",
-    gene_symbol = "G1",
-    gene_length_bp = 0
-  )
-
-  testthat::expect_error(
-    prepare_expression(counts, "counts", annotation),
-    "positive.*gene_length_bp"
-  )
-})
-
-testthat::test_that("expression preparation rejects an invalid expression type", {
-  x <- matrix(1, nrow = 1, dimnames = list("A", "s1"))
-
-  testthat::expect_error(prepare_expression(x, "fpkm"), "counts.*tpm")
-})
-
-testthat::test_that("expression preparation rejects duplicated sample identifiers", {
-  x <- matrix(
-    c(1, 2),
-    nrow = 1,
-    dimnames = list("A", c("s1", "s1"))
-  )
-
-  testthat::expect_error(prepare_expression(x, "tpm"), "sample.*unique")
-})
-
-testthat::test_that("whitespace-only symbols are recorded as unmapped", {
-  x <- matrix(
-    c(1, 2, 2, 1),
-    nrow = 2,
-    dimnames = list(c("g1", "g2"), c("s1", "s2"))
-  )
-  annotation <- tibble::tibble(
-    gene_id = c("g1", "g2"),
-    gene_symbol = c("G1", " ")
-  )
-
-  result <- prepare_expression(x, "tpm", annotation)
-
-  testthat::expect_identical(rownames(result$tpm), "G1")
+  testthat::expect_identical(rownames(result$cpm), "A")
+  testthat::expect_equal(unname(result$cpm), matrix(c(5, 12), nrow = 1))
+  testthat::expect_equal(result$log_expression, log2(result$cpm))
   testthat::expect_identical(
     result$mapping_report$mapping_action,
-    c("mapped", "unmapped")
+    c("duplicate_gene_name_collapsed", "duplicate_gene_name_collapsed")
   )
-  testthat::expect_true(any(result$excluded_genes$reason == "unmapped_gene_symbol"))
 })
 
-testthat::test_that("annotation-missing TPM genes are recorded as unmapped", {
-  x <- matrix(
-    c(1, 2, 2, 1),
-    nrow = 2,
-    dimnames = list(c("g1", "g2"), c("s1", "s2"))
+testthat::test_that("prepared CPM must be strictly positive", {
+  cpm <- matrix(c(1, 0), nrow = 1,
+    dimnames = list("g1", c("s1", "s2")))
+  annotation <- tibble::tibble(
+    gene_id = "g1", gene_name = "A", gene_type = NA_character_
   )
-  annotation <- tibble::tibble(gene_id = "g1", gene_symbol = "G1")
 
-  result <- prepare_expression(x, "tpm", annotation)
+  testthat::expect_error(prepare_expression(cpm, annotation), "strictly positive")
+})
 
-  testthat::expect_identical(rownames(result$tpm), "G1")
+testthat::test_that("compressed GTF and trimmed IDs are supported", {
+  gtf <- tempfile(fileext = ".gtf.gz")
+  connection <- gzfile(gtf, "wt")
+  writeLines(
+    "1\tsrc\tgene\t1\t10\t.\t+\t.\tgene_id \"g1\"; gene_name \"A\"; gene_type \"lncRNA\";",
+    connection
+  )
+  close(connection)
+  cpm <- matrix(c(2, 4), nrow = 1,
+    dimnames = list(" g1 ", c("s1", "s2")))
+
+  result <- prepare_expression(cpm, read_gtf_gene_annotation(gtf))
+
+  testthat::expect_identical(rownames(result$cpm), "A")
+  testthat::expect_equal(as.numeric(result$cpm), c(2, 4))
+})
+
+testthat::test_that("missing gene names and GTF IDs are reported", {
+  cpm <- matrix(1:6, nrow = 3,
+    dimnames = list(c("g1", "g2", "g3"), c("s1", "s2")))
+  annotation <- tibble::tibble(
+    gene_id = c("g1", "g2"), gene_name = c("A", NA_character_),
+    gene_type = c("protein_coding", "lncRNA")
+  )
+
+  result <- prepare_expression(cpm, annotation)
+
   testthat::expect_identical(
     result$mapping_report$mapping_action,
-    c("mapped", "unmapped")
+    c("mapped", "missing_gene_name", "missing_gtf_gene_id")
   )
-  testthat::expect_true(any(
-    result$excluded_genes$gene_id == "g2" &
-      result$excluded_genes$reason == "unmapped_gene_symbol"
-  ))
+  testthat::expect_true(any(result$excluded_genes$gene_id == "g2"))
+  testthat::expect_true(any(result$excluded_genes$gene_id == "g3"))
 })
 
-testthat::test_that("the expression CLI writes its four declared outputs", {
+testthat::test_that("duplicate GTF IDs stop validation", {
+  annotation <- tibble::tibble(
+    gene_id = c("g1", "g1"), gene_name = c("A", "A"),
+    gene_type = c("protein_coding", "protein_coding")
+  )
+
+  testthat::expect_error(validate_gtf_gene_annotation(annotation), "gene_id.*unique")
+})
+
+testthat::test_that("malformed GTF records stop parsing", {
+  gtf <- tempfile(fileext = ".gtf")
+  writeLines("1\tsrc\tgene\t1\t10", gtf)
+
+  testthat::expect_error(read_gtf_gene_annotation(gtf), "nine.*fields")
+})
+
+testthat::test_that("the CPM CLI writes its four declared outputs", {
   input <- tempfile(fileext = ".tsv")
+  gtf <- tempfile(fileext = ".gtf")
   output_dir <- tempfile()
   dir.create(output_dir)
-  x <- matrix(
-    c(0, 1e6),
-    nrow = 2,
-    dimnames = list(c("A", "B"), "s1")
+  write_numeric_matrix(
+    matrix(c(2, 4), nrow = 1, dimnames = list("g1", c("s1", "s2"))),
+    input,
+    "gene_id"
   )
-  write_numeric_matrix(x, input, "gene_id")
+  writeLines(
+    "1\tsrc\tgene\t1\t10\t.\t+\t.\tgene_id \"g1\"; gene_name \"A\";",
+    gtf
+  )
   original_working_directory <- setwd(pipeline_root)
   on.exit(setwd(original_working_directory), add = TRUE)
 
   status <- system2(
-    "Rscript",
-    c(
-      "scripts/prepare_expression.R", "--expression", input,
-      "--expression-type", "tpm", "--output-dir", output_dir
-    )
+    file.path(R.home("bin"), "Rscript"),
+    c("scripts/prepare_expression.R", "--expression", shQuote(input),
+      "--gtf", shQuote(gtf), "--output-dir", shQuote(output_dir))
+  )
+  expected <- c(
+    "prepared_cpm.tsv.gz", "prepared_log2_cpm.tsv.gz",
+    "gene_mapping_report.tsv", "excluded_genes.tsv"
   )
 
   testthat::expect_equal(status, 0L)
-  testthat::expect_true(all(file.exists(file.path(output_dir, c(
-    "prepared_tpm.tsv.gz", "prepared_log2_tpm_plus_1.tsv.gz",
-    "gene_mapping_report.tsv", "excluded_genes.tsv"
-  )))))
+  testthat::expect_true(all(file.exists(file.path(output_dir, expected))))
 })

@@ -7,6 +7,7 @@ lm22_group_map <- function() {
       "T cells regulatory (Tregs)"
     ),
     "CD8 T cells" = "T cells CD8",
+    "Gamma-delta T cells" = "T cells gamma delta",
     "NK cells" = c("NK cells resting", "NK cells activated"),
     "Monocyte/myeloid" = c(
       "Monocytes", "Macrophages M0", "Macrophages M1", "Macrophages M2"
@@ -14,9 +15,7 @@ lm22_group_map <- function() {
     "Neutrophils" = "Neutrophils",
     "Eosinophils" = "Eosinophils",
     "Dendritic cells" = c("Dendritic cells resting", "Dendritic cells activated"),
-    "Other LM22" = c(
-      "T cells gamma delta", "Mast cells resting", "Mast cells activated"
-    )
+    "Mast cells" = c("Mast cells resting", "Mast cells activated")
   )
 }
 

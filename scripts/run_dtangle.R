@@ -1,0 +1,110 @@
+#!/usr/bin/env Rscript
+
+file_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+script_path <- normalizePath(sub("^--file=", "", file_arg[[1]]))
+source(file.path(dirname(script_path), "bootstrap.R"))
+
+utc_time <- function() format(Sys.time(), tz = "UTC", usetz = TRUE)
+
+run_dtangle_stage <- function() {
+  option_list <- list(
+    optparse::make_option(
+      "--bulk-log",
+      dest = "bulk_log",
+      type = "character",
+      help = "Gene-by-sample log2(TPM + 1) matrix TSV with gene_symbol first column."
+    ),
+    optparse::make_option(
+      "--lm22",
+      type = "character",
+      help = "Standard positive linear LM22 matrix TSV with gene_symbol first column."
+    ),
+    optparse::make_option(
+      "--min-overlap",
+      dest = "min_overlap",
+      type = "double",
+      default = pipeline_defaults()$min_lm22_overlap,
+      help = "Minimum fraction of LM22 genes shared with bulk expression."
+    ),
+    optparse::make_option(
+      "--marker-fraction",
+      dest = "marker_fraction",
+      type = "double",
+      default = pipeline_defaults()$marker_fraction,
+      help = "Fraction of reference genes used as dtangle markers."
+    ),
+    optparse::make_option(
+      "--quantile-normalize",
+      dest = "quantile_normalize",
+      action = "store_true",
+      default = FALSE,
+      help = "Jointly quantile normalize LM22 and bulk profiles for dtangle only."
+    ),
+    optparse::make_option(
+      "--output-dir",
+      dest = "output_dir",
+      type = "character",
+      help = "Directory for dtangle outputs."
+    )
+  )
+  options <- optparse::parse_args(optparse::OptionParser(option_list = option_list))
+  required_options <- c("bulk_log", "lm22", "output_dir")
+  missing_options <- required_options[vapply(
+    options[required_options],
+    function(value) is.null(value) || !nzchar(value),
+    logical(1)
+  )]
+  if (length(missing_options) > 0L) {
+    stop(
+      sprintf("Missing required options: %s", paste(missing_options, collapse = ", ")),
+      call. = FALSE
+    )
+  }
+
+  message(sprintf("stage=dtangle utc_start=%s", utc_time()))
+  bulk_log <- read_numeric_matrix(options$bulk_log, "gene_symbol")
+  lm22_linear <- read_numeric_matrix(options$lm22, "gene_symbol")
+  message(sprintf(
+    "stage=dtangle bulk_dimensions=genes:%d samples:%d lm22_dimensions=genes:%d cell_types:%d",
+    nrow(bulk_log), ncol(bulk_log), nrow(lm22_linear), ncol(lm22_linear)
+  ))
+  inputs <- prepare_dtangle_inputs(
+    bulk_log = bulk_log,
+    lm22_linear = lm22_linear,
+    min_overlap = options$min_overlap,
+    quantile_normalize = options$quantile_normalize
+  )
+  fit <- estimate_dtangle(inputs, marker_fraction = options$marker_fraction)
+
+  dir.create(options$output_dir, recursive = TRUE, showWarnings = FALSE)
+  output_paths <- list(
+    proportions = file.path(options$output_dir, "dtangle_proportions.tsv"),
+    markers = file.path(options$output_dir, "dtangle_markers.tsv"),
+    metadata = file.path(options$output_dir, "dtangle_metadata.json"),
+    overlap = file.path(options$output_dir, "dtangle_overlap.tsv"),
+    lm22_log = file.path(options$output_dir, "dtangle_lm22_log.tsv.gz"),
+    shared_bulk = file.path(options$output_dir, "dtangle_shared_bulk.tsv.gz")
+  )
+  message(sprintf(
+    "stage=dtangle output_paths=%s",
+    paste(unlist(output_paths, use.names = FALSE), collapse = ",")
+  ))
+  write_numeric_matrix(fit$proportions, output_paths$proportions, "sample_id")
+  readr::write_tsv(fit$markers, output_paths$markers, na = "")
+  jsonlite::write_json(fit$metadata, output_paths$metadata, auto_unbox = TRUE, pretty = TRUE)
+  readr::write_tsv(inputs$overlap_report, output_paths$overlap, na = "")
+  write_numeric_matrix(inputs$transformed_lm22, output_paths$lm22_log, "gene_symbol")
+  write_numeric_matrix(inputs$shared_bulk, output_paths$shared_bulk, "gene_symbol")
+  message(sprintf("stage=dtangle utc_complete=%s", utc_time()))
+}
+
+tryCatch(
+  run_dtangle_stage(),
+  error = function(error) {
+    message(sprintf(
+      "stage=dtangle status=failed utc_time=%s message=%s",
+      utc_time(), conditionMessage(error)
+    ))
+    quit(status = 1L)
+  }
+)

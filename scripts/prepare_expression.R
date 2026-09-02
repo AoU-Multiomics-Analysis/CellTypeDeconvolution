@@ -11,7 +11,7 @@ run_prepare_expression <- function() {
     optparse::make_option(
       "--expression",
       type = "character",
-      help = "Gene-by-sample positive linear CPM matrix TSV with a gene_id first column."
+      help = "BED or BED.GZ positive linear CPM matrix with coordinate columns."
     ),
     optparse::make_option(
       "--gtf",
@@ -40,40 +40,43 @@ run_prepare_expression <- function() {
   }
 
   message(sprintf("stage=prepare_expression utc_start=%s", utc_time()))
-  cpm <- read_numeric_matrix(options$expression, "gene_id")
+  expression <- read_expression_bed(options$expression)
   message(sprintf(
-    "stage=prepare_expression input_dimensions=genes:%d samples:%d",
-    nrow(cpm),
-    ncol(cpm)
+    "stage=prepare_expression input_rows=%d samples=%d",
+    nrow(expression$cpm),
+    ncol(expression$cpm)
   ))
   annotation <- read_gtf_gene_annotation(options$gtf)
   message(sprintf(
     "stage=prepare_expression gtf_gene_count=%d",
     nrow(annotation)
   ))
-  result <- prepare_expression(cpm = cpm, annotation = annotation)
-  mapped_gene_name_count <- sum(result$mapping_report$mapping_action %in% c(
-    "mapped", "duplicate_gene_name_collapsed"
-  ))
+  result <- prepare_expression_bed(expression = expression, annotation = annotation)
   message(sprintf(
-    "stage=prepare_expression mapped_gene_name_count=%d collapsed_gene_name_count=%d",
-    mapped_gene_name_count,
-    nrow(result$cpm)
+    "stage=prepare_expression mapped_tca_rows=%d dtangle_symbols=%d samples=%d",
+    nrow(result$tca_cpm),
+    nrow(result$dtangle_cpm),
+    ncol(result$tca_cpm)
   ))
 
   dir.create(options$output_dir, recursive = TRUE, showWarnings = FALSE)
   output_paths <- list(
-    cpm = file.path(options$output_dir, "prepared_cpm.tsv.gz"),
-    log_expression = file.path(options$output_dir, "prepared_log2_cpm.tsv.gz"),
+    tca_cpm = file.path(options$output_dir, "prepared_tca_cpm.tsv.gz"),
+    tca_log = file.path(options$output_dir, "prepared_tca_log2_cpm.tsv.gz"),
+    dtangle_cpm = file.path(options$output_dir, "prepared_dtangle_cpm.tsv.gz"),
+    dtangle_log = file.path(options$output_dir, "prepared_dtangle_log2_cpm.tsv.gz"),
+    coordinates = file.path(options$output_dir, "prepared_coordinates.tsv"),
     mapping_report = file.path(options$output_dir, "gene_mapping_report.tsv"),
     excluded_genes = file.path(options$output_dir, "excluded_genes.tsv")
   )
-  message(sprintf(
-    "stage=prepare_expression output_paths=%s",
-    paste(unlist(output_paths, use.names = FALSE), collapse = ",")
-  ))
-  write_numeric_matrix(result$cpm, output_paths$cpm, "gene_name")
-  write_numeric_matrix(result$log_expression, output_paths$log_expression, "gene_name")
+  purrr::iwalk(output_paths, function(path, name) {
+    message(sprintf("stage=prepare_expression output_%s=%s", name, path))
+  })
+  write_numeric_matrix(result$tca_cpm, output_paths$tca_cpm, "gene_id")
+  write_numeric_matrix(result$tca_log_expression, output_paths$tca_log, "gene_id")
+  write_numeric_matrix(result$dtangle_cpm, output_paths$dtangle_cpm, "gene_name")
+  write_numeric_matrix(result$dtangle_log_expression, output_paths$dtangle_log, "gene_name")
+  readr::write_tsv(result$coordinates, output_paths$coordinates, na = "")
   readr::write_tsv(result$mapping_report, output_paths$mapping_report, na = "")
   readr::write_tsv(result$excluded_genes, output_paths$excluded_genes, na = "")
   message(sprintf("stage=prepare_expression utc_complete=%s", utc_time()))

@@ -183,7 +183,7 @@ make_cpm_mapping_report <- function(cpm, annotation) {
     mapping_action = dplyr::case_when(
       is.na(matching_indices) ~ "missing_gtf_gene_id",
       !usable_gene_names ~ "missing_gene_name",
-      duplicate_gene_names ~ "duplicate_gene_name_collapsed",
+      duplicate_gene_names ~ "duplicate_gene_name_aggregated_for_dtangle",
       TRUE ~ "mapped"
     )
   )
@@ -192,7 +192,7 @@ make_cpm_mapping_report <- function(cpm, annotation) {
 make_excluded_genes <- function(mapping_report) {
   mapping_report |>
     dplyr::filter(!(.data$mapping_action %in% c(
-      "mapped", "duplicate_gene_name_collapsed"
+      "mapped", "duplicate_gene_name_aggregated_for_dtangle"
     ))) |>
     dplyr::transmute(
       gene_id = .data$gene_id,
@@ -215,6 +215,35 @@ prepare_expression <- function(cpm, annotation) {
   list(
     cpm = prepared_cpm,
     log_expression = log2(prepared_cpm),
+    mapping_report = mapping_report,
+    excluded_genes = make_excluded_genes(mapping_report)
+  )
+}
+
+prepare_expression_bed <- function(expression, annotation) {
+  if (!is.list(expression) ||
+      !all(c("coordinates", "cpm") %in% names(expression))) {
+    stop("expression must contain coordinates and cpm", call. = FALSE)
+  }
+  cpm <- validate_cpm_matrix(expression$cpm)
+  annotation <- validate_gtf_gene_annotation(annotation)
+  mapping_report <- make_cpm_mapping_report(cpm, annotation)
+  mapped_ids <- mapping_report |>
+    dplyr::filter(!is.na(.data$gene_name), nzchar(.data$gene_name)) |>
+    dplyr::pull("gene_id")
+  if (length(mapped_ids) == 0L) {
+    stop("No expression genes have a usable GTF gene_name", call. = FALSE)
+  }
+  tca_cpm <- cpm[mapped_ids, , drop = FALSE]
+  coordinate_index <- match(mapped_ids, expression$coordinates$gene_id)
+  coordinates <- expression$coordinates[coordinate_index, , drop = FALSE]
+  dtangle_cpm <- collapse_cpm_to_gene_names(cpm, annotation)
+  list(
+    tca_cpm = tca_cpm,
+    tca_log_expression = log2(tca_cpm),
+    dtangle_cpm = dtangle_cpm,
+    dtangle_log_expression = log2(dtangle_cpm),
+    coordinates = coordinates,
     mapping_report = mapping_report,
     excluded_genes = make_excluded_genes(mapping_report)
   )

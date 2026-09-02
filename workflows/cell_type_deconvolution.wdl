@@ -6,6 +6,24 @@ import "tasks/proportions.wdl" as proportion_tasks
 import "tasks/tca.wdl" as tca_tasks
 import "tasks/qc.wdl" as qc_tasks
 
+struct EffectiveParameters {
+  String proportion_mode
+  Float min_lm22_overlap
+  Float dtangle_marker_fraction
+  String dtangle_marker_method
+  Boolean dtangle_quantile_normalize
+  Float group_mean_threshold
+  Float zero_floor
+  Int tca_shard_size
+  Int tca_max_iters
+  Int random_seed
+  Boolean write_tsv
+  Int hdf5_gene_chunk_max
+  Int hdf5_sample_chunk_max
+  Int hdf5_gzip_level
+  String scale
+}
+
 workflow cell_type_deconvolution {
   input {
     File expression
@@ -13,10 +31,8 @@ workflow cell_type_deconvolution {
     File? lm22
     File? precomputed_proportions
     File? covariates
-    File? parameters_json
     String docker_image
     String pipeline_version = "0.1.0"
-    String tca_version = "1.2.1"
     Float min_lm22_overlap = 0.80
     Float dtangle_marker_fraction = 0.10
     Boolean dtangle_quantile_normalize = false
@@ -64,8 +80,28 @@ workflow cell_type_deconvolution {
     Int manifest_max_retries = 2
   }
 
+  String tca_version = "1.2.1"
   Boolean estimate_proportions = !defined(precomputed_proportions)
+  String proportion_mode = if estimate_proportions then "dtangle" else "precomputed"
   String dtangle_marker_method = "ratio"
+  EffectiveParameters effective_parameters = EffectiveParameters {
+    proportion_mode: proportion_mode,
+    min_lm22_overlap: min_lm22_overlap,
+    dtangle_marker_fraction: dtangle_marker_fraction,
+    dtangle_marker_method: dtangle_marker_method,
+    dtangle_quantile_normalize: dtangle_quantile_normalize,
+    group_mean_threshold: group_mean_threshold,
+    zero_floor: zero_floor,
+    tca_shard_size: tca_shard_size,
+    tca_max_iters: tca_max_iters,
+    random_seed: random_seed,
+    write_tsv: write_tsv,
+    hdf5_gene_chunk_max: 500,
+    hdf5_sample_chunk_max: 256,
+    hdf5_gzip_level: 6,
+    scale: "log2_cpm"
+  }
+  File effective_parameters_json = write_json(effective_parameters)
 
   call expression_tasks.PrepareExpression {
     input:
@@ -180,7 +216,7 @@ workflow cell_type_deconvolution {
       combined_proportions = ProcessProportions.combined,
       tca_weights = ProcessProportions.tca_weights,
       filter_report = ProcessProportions.filter_report,
-      parameters_json = parameters_json,
+      parameters_json = effective_parameters_json,
       pipeline_version = pipeline_version,
       tca_version = tca_version,
       container_image = docker_image,
@@ -232,6 +268,7 @@ workflow cell_type_deconvolution {
     File assembly_log = AssembleTca.log
     File output_inventory = BuildManifest.provenance
     File output_manifest = BuildManifest.output_manifest
+    File effective_parameters_file = effective_parameters_json
     File manifest_log = BuildManifest.log
   }
 }

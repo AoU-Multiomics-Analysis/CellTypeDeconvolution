@@ -66,6 +66,45 @@ testthat::test_that("top-level workflow requires CPM and GTF and exposes both pr
   testthat::expect_false(grepl("expression_type|gene_length", text))
 })
 
+testthat::test_that("top-level manifest records effective parameters with a pinned TCA version", {
+  text <- wdl_text("workflows/cell_type_deconvolution.wdl")
+  workflow_inputs <- stringr::str_match(
+    text,
+    "workflow cell_type_deconvolution \\{\\n  input \\{([\\s\\S]*?)\\n  \\}"
+  )[, 2L]
+  testthat::expect_false(grepl("parameters_json", workflow_inputs, fixed = TRUE))
+  testthat::expect_false(grepl("tca_version", workflow_inputs, fixed = TRUE))
+  testthat::expect_match(
+    text,
+    "String tca_version = \"1.2.1\"",
+    fixed = TRUE
+  )
+  testthat::expect_match(
+    text,
+    "EffectiveParameters effective_parameters = EffectiveParameters {",
+    fixed = TRUE
+  )
+  testthat::expect_match(
+    text,
+    "File effective_parameters_json = write_json(effective_parameters)",
+    fixed = TRUE
+  )
+  purrr::walk(c(
+    "proportion_mode", "min_lm22_overlap", "dtangle_marker_fraction",
+    "dtangle_marker_method", "dtangle_quantile_normalize",
+    "group_mean_threshold", "zero_floor", "tca_shard_size",
+    "tca_max_iters", "random_seed", "write_tsv",
+    "hdf5_gene_chunk_max", "hdf5_sample_chunk_max",
+    "hdf5_gzip_level", "scale"
+  ), ~ testthat::expect_match(text, .x, fixed = TRUE))
+  testthat::expect_match(
+    text,
+    "parameters_json = effective_parameters_json",
+    fixed = TRUE
+  )
+  testthat::expect_match(text, "tca_version = tca_version", fixed = TRUE)
+})
+
 testthat::test_that("synthetic smoke fixtures are deterministic and restart without LM22", {
   generator <- testthat::test_path(
     "../..", "scripts", "generate_synthetic_fixture.R"
@@ -111,7 +150,20 @@ testthat::test_that("synthetic smoke fixtures are deterministic and restart with
   testthat::expect_true(any(grepl('gene_type "protein_coding"', gtf)))
   testthat::expect_true(any(grepl('gene_type "lncRNA"', gtf)))
   restart <- jsonlite::read_json(file.path(first, "restart.inputs.json"))
+  dtangle <- jsonlite::read_json(file.path(first, "dtangle.inputs.json"))
   testthat::expect_false("cell_type_deconvolution.lm22" %in% names(restart))
+  testthat::expect_false(
+    "cell_type_deconvolution.parameters_json" %in% names(restart)
+  )
+  testthat::expect_false(
+    "cell_type_deconvolution.tca_version" %in% names(restart)
+  )
+  testthat::expect_false(
+    "cell_type_deconvolution.parameters_json" %in% names(dtangle)
+  )
+  testthat::expect_false(
+    "cell_type_deconvolution.tca_version" %in% names(dtangle)
+  )
   testthat::expect_identical(
     restart$cell_type_deconvolution.precomputed_proportions,
     "tests/fixtures/precomputed_proportions.tsv"

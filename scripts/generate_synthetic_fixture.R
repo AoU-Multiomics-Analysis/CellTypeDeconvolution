@@ -145,7 +145,6 @@ common_inputs <- list(
   "cell_type_deconvolution.covariates" = "tests/fixtures/batch_indicator.tsv",
   "cell_type_deconvolution.docker_image" = "celltype-deconvolution:test",
   "cell_type_deconvolution.pipeline_version" = "smoke-20260901",
-  "cell_type_deconvolution.tca_version" = "1.2.1",
   "cell_type_deconvolution.min_lm22_overlap" = 0.80,
   "cell_type_deconvolution.dtangle_marker_fraction" = 0.10,
   "cell_type_deconvolution.dtangle_quantile_normalize" = FALSE,

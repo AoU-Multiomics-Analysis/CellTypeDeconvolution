@@ -18,6 +18,13 @@ fixture_directory <- if (length(arguments) == 2L) {
   "tests/fixtures"
 }
 outputs <- jsonlite::read_json(outputs_path, simplifyVector = TRUE)
+estimated_proportions_key <-
+  "cell_type_deconvolution.estimated_proportions"
+expected_proportion_mode <- if (is.null(outputs[[estimated_proportions_key]])) {
+  "precomputed"
+} else {
+  "dtangle"
+}
 
 output_value <- function(name) {
   key <- paste0("cell_type_deconvolution.", name)
@@ -172,6 +179,37 @@ manifest <- jsonlite::read_json(
   output_value("output_manifest"),
   simplifyVector = FALSE
 )
+parameters <- manifest$parameters
+required_parameter_names <- c(
+  "proportion_mode", "min_lm22_overlap", "dtangle_marker_fraction",
+  "dtangle_marker_method", "dtangle_quantile_normalize",
+  "group_mean_threshold", "zero_floor", "tca_shard_size",
+  "tca_max_iters", "random_seed", "write_tsv",
+  "hdf5_gene_chunk_max", "hdf5_sample_chunk_max",
+  "hdf5_gzip_level", "scale"
+)
+numeric_parameter <- function(name) {
+  as.numeric(parameters[[name]])
+}
+stopifnot(
+  setequal(names(parameters), required_parameter_names),
+  identical(parameters$proportion_mode, expected_proportion_mode),
+  numeric_parameter("min_lm22_overlap") == 0.80,
+  numeric_parameter("dtangle_marker_fraction") == 0.10,
+  identical(parameters$dtangle_marker_method, "ratio"),
+  identical(parameters$dtangle_quantile_normalize, FALSE),
+  numeric_parameter("group_mean_threshold") == 0.0001,
+  numeric_parameter("zero_floor") == 0.000001,
+  numeric_parameter("tca_shard_size") == 24,
+  numeric_parameter("tca_max_iters") == 10,
+  numeric_parameter("random_seed") == 20260901,
+  identical(parameters$write_tsv, TRUE),
+  numeric_parameter("hdf5_gene_chunk_max") == 500,
+  numeric_parameter("hdf5_sample_chunk_max") == 256,
+  numeric_parameter("hdf5_gzip_level") == 6,
+  identical(parameters$scale, "log2_cpm"),
+  identical(manifest$tca_version, "1.2.1")
+)
 manifest_outputs <- manifest$outputs
 stopifnot(length(manifest_outputs) == nrow(inventory))
 purrr::walk(manifest_outputs, function(entry) {
@@ -189,7 +227,8 @@ required_file_outputs <- c(
   "prepared_cpm", "prepared_log2_cpm", "mapping_report",
   "prepare_excluded_genes", "prepare_log", "cell_group_filter_report",
   "proportions_log", "tca_model", "tca_model_log", "tca_excluded_genes",
-  "fit_tca_log", "qc_summary", "qc_plots", "assembly_log", "manifest_log"
+  "fit_tca_log", "qc_summary", "qc_plots", "assembly_log",
+  "effective_parameters_file", "manifest_log"
 )
 purrr::walk(required_file_outputs, function(name) {
   stopifnot(file.exists(output_value(name)))

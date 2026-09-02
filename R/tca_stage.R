@@ -97,7 +97,7 @@ remove_constant_features <- function(X) {
   list(
     matrix = X[!constant, , drop = FALSE],
     report = tibble::tibble(
-      gene_name = rownames(X)[constant],
+      gene_id = rownames(X)[constant],
       reason = rep("constant_expression", sum(constant))
     )
   )
@@ -109,47 +109,6 @@ validate_positive_integer <- function(value, label) {
     stop(sprintf("%s must be one positive integer", label), call. = FALSE)
   }
   as.integer(value)
-}
-
-make_gene_shard_manifest <- function(
-    genes,
-    shard_size = pipeline_defaults()$tensor_shard_size) {
-  if (!is.character(genes) || length(genes) == 0L || anyNA(genes) ||
-      any(!nzchar(genes)) || anyDuplicated(genes) > 0L) {
-    stop("genes must be a non-empty vector of unique identifiers", call. = FALSE)
-  }
-  shard_size <- validate_positive_integer(shard_size, "shard_size")
-  gene_index <- seq_along(genes)
-  shard_id <- as.integer((gene_index - 1L) %/% shard_size + 1L)
-  index_within_shard <- as.integer((gene_index - 1L) %% shard_size + 1L)
-
-  tibble::tibble(
-    gene_index = as.integer(gene_index),
-    gene_name = genes,
-    shard_id = shard_id,
-    shard_name = sprintf("shard_%05d", shard_id),
-    index_within_shard = index_within_shard
-  )
-}
-
-write_gene_shards <- function(
-    genes,
-    shard_size = pipeline_defaults()$tensor_shard_size,
-    output_dir) {
-  if (!is.character(output_dir) || length(output_dir) != 1L ||
-      is.na(output_dir) || !nzchar(output_dir)) {
-    stop("output_dir must be one non-empty path", call. = FALSE)
-  }
-  manifest <- make_gene_shard_manifest(genes, shard_size)
-  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-
-  shard_names <- unique(manifest$shard_name)
-  purrr::walk(shard_names, function(shard_name) {
-    shard_genes <- manifest$gene_name[manifest$shard_name == shard_name]
-    writeLines(shard_genes, file.path(output_dir, paste0(shard_name, ".txt")))
-  })
-
-  manifest
 }
 
 tca_utc_time <- function() {

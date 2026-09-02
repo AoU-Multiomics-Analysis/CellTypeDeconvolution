@@ -12,7 +12,7 @@ run_tca_stage <- function() {
       "--expression-log",
       dest = "expression_log",
       type = "character",
-      help = "Gene-by-sample log2(CPM) TSV with gene_name first column."
+      help = "Gene-by-sample log2(CPM) TSV with gene_id first column."
     ),
     optparse::make_option(
       "--weights",
@@ -40,13 +40,6 @@ run_tca_stage <- function() {
       help = "Maximum number of TCA optimization iterations."
     ),
     optparse::make_option(
-      "--shard-size",
-      dest = "shard_size",
-      type = "integer",
-      default = pipeline_defaults()$tensor_shard_size,
-      help = "Number of genes in each later tensor-extraction shard."
-    ),
-    optparse::make_option(
       "--random-seed",
       dest = "random_seed",
       type = "integer",
@@ -57,7 +50,7 @@ run_tca_stage <- function() {
       "--output-dir",
       dest = "output_dir",
       type = "character",
-      help = "Directory for the model, filtered expression, and gene shards."
+      help = "Directory for the model, filtered expression, and excluded-gene report."
     )
   )
   options <- optparse::parse_args(optparse::OptionParser(option_list = option_list))
@@ -79,8 +72,7 @@ run_tca_stage <- function() {
     model = file.path(options$output_dir, "tca_model.rds"),
     model_log = file.path(options$output_dir, "tca_model.log"),
     expression = file.path(options$output_dir, "tca_expression.tsv.gz"),
-    excluded_genes = file.path(options$output_dir, "tca_excluded_genes.tsv"),
-    shard_manifest = file.path(options$output_dir, "gene_shard_manifest.tsv")
+    excluded_genes = file.path(options$output_dir, "tca_excluded_genes.tsv")
   )
   tca_log_path <<- output_paths$model_log
   append_tca_log(
@@ -92,7 +84,7 @@ run_tca_stage <- function() {
   )
   message(sprintf("stage=tca utc_start=%s scale=log2_cpm", tca_utc_time()))
 
-  X <- read_numeric_matrix(options$expression_log, "gene_name")
+  X <- read_numeric_matrix(options$expression_log, "gene_id")
   W <- read_numeric_matrix(options$weights, "sample_id")
   C2 <- if (is.null(options$covariates) || !nzchar(options$covariates)) {
     NULL
@@ -112,10 +104,9 @@ run_tca_stage <- function() {
   message(dimension_message)
   append_tca_log(tca_log_path, dimension_message)
   settings_message <- sprintf(
-    "stage=tca settings=num_cores:%d max_iters:%d shard_size:%d random_seed:%d",
+    "stage=tca settings=num_cores:%d max_iters:%d random_seed:%d",
     options$num_cores,
     options$max_iters,
-    options$shard_size,
     options$random_seed
   )
   message(settings_message)
@@ -136,26 +127,18 @@ run_tca_stage <- function() {
     random_seed = options$random_seed,
     log_file = output_paths$model_log
   )
-  manifest <- write_gene_shards(
-    rownames(result$X),
-    shard_size = options$shard_size,
-    output_dir = options$output_dir
-  )
-
   saveRDS(result$model, output_paths$model)
-  write_numeric_matrix(result$X, output_paths$expression, "gene_name")
+  write_numeric_matrix(result$X, output_paths$expression, "gene_id")
   readr::write_tsv(result$excluded_genes, output_paths$excluded_genes, na = "")
-  readr::write_tsv(manifest, output_paths$shard_manifest, na = "")
   complete_message <- sprintf(
     paste0(
       "stage=tca event=stage_complete output_dimensions=genes:%d samples:%d ",
-      "groups:%d excluded_constant_genes:%d shards:%d scale=log2_cpm"
+      "retained_groups:%d excluded_constant_genes:%d scale=log2_cpm"
     ),
     nrow(result$X),
     ncol(result$X),
     ncol(W),
-    nrow(result$excluded_genes),
-    length(unique(manifest$shard_id))
+    nrow(result$excluded_genes)
   )
   message(sprintf("%s utc_complete=%s", complete_message, tca_utc_time()))
   append_tca_log(tca_log_path, complete_message)

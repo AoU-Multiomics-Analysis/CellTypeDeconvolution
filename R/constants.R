@@ -37,8 +37,7 @@ pipeline_defaults <- function() {
     min_lm22_overlap = 0.80,
     marker_fraction = 0.10,
     group_mean_threshold = 0.0001,
-    zero_floor = 1e-6,
-    tensor_shard_size = 500L
+    zero_floor = 1e-6
   )
 }
 

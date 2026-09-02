@@ -110,35 +110,25 @@ testthat::test_that("TCA validates covariate rows, values, and intercepts", {
   )
 })
 
-testthat::test_that("constant genes are removed and shard order is stable", {
-  X <- rbind(variable = 1:7, constant = rep(2, 7))
-
-  filtered <- remove_constant_features(X)
-  manifest <- make_gene_shard_manifest(rownames(filtered$matrix), 3L)
-
-  testthat::expect_identical(filtered$report$gene_name, "constant")
-  testthat::expect_identical(filtered$report$reason, "constant_expression")
-  testthat::expect_identical(manifest$gene_name, "variable")
+testthat::test_that("constant-gene removal reports gene_id and preserves order", {
+  X <- matrix(
+    c(1, 1, 2, 3, 4, 6),
+    nrow = 3,
+    byrow = TRUE,
+    dimnames = list(c("g1", "g2", "g3"), c("S1", "S2"))
+  )
+  result <- remove_constant_features(X)
+  testthat::expect_identical(rownames(result$matrix), c("g2", "g3"))
+  testthat::expect_identical(result$report$gene_id, "g1")
+  testthat::expect_identical(result$report$reason, "constant_expression")
 })
 
-testthat::test_that("gene shards use stable order and zero-padded names", {
-  genes <- paste0("G", 1:7)
-  output_dir <- tempfile("gene-shards-")
-
-  manifest <- write_gene_shards(genes, 3L, output_dir)
-
-  testthat::expect_identical(manifest$gene_index, 1:7)
-  testthat::expect_identical(manifest$gene_name, genes)
-  testthat::expect_identical(manifest$shard_id, c(1L, 1L, 1L, 2L, 2L, 2L, 3L))
-  testthat::expect_identical(
-    manifest$shard_name,
-    c(rep("shard_00001", 3L), rep("shard_00002", 3L), "shard_00003")
-  )
-  testthat::expect_identical(manifest$index_within_shard, c(1L, 2L, 3L, 1L, 2L, 3L, 1L))
-  testthat::expect_identical(
-    readLines(file.path(output_dir, "shard_00002.txt")),
-    c("G4", "G5", "G6")
-  )
+testthat::test_that("the TCA CLI does not create shard artifacts", {
+  text <- paste(readLines(
+    testthat::test_path("../..", "scripts", "fit_tca.R"),
+    warn = FALSE
+  ), collapse = "\n")
+  testthat::expect_false(grepl("--shard-size", text, fixed = TRUE))
 })
 
 testthat::test_that("one model fits all genes without refitting weights", {

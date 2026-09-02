@@ -139,6 +139,27 @@ testthat::test_that("whitespace-only symbols are recorded as unmapped", {
   testthat::expect_true(any(result$excluded_genes$reason == "unmapped_gene_symbol"))
 })
 
+testthat::test_that("annotation-missing TPM genes are recorded as unmapped", {
+  x <- matrix(
+    c(1, 2, 2, 1),
+    nrow = 2,
+    dimnames = list(c("g1", "g2"), c("s1", "s2"))
+  )
+  annotation <- tibble::tibble(gene_id = "g1", gene_symbol = "G1")
+
+  result <- prepare_expression(x, "tpm", annotation)
+
+  testthat::expect_identical(rownames(result$tpm), "G1")
+  testthat::expect_identical(
+    result$mapping_report$mapping_action,
+    c("mapped", "unmapped")
+  )
+  testthat::expect_true(any(
+    result$excluded_genes$gene_id == "g2" &
+      result$excluded_genes$reason == "unmapped_gene_symbol"
+  ))
+})
+
 testthat::test_that("the expression CLI writes its four declared outputs", {
   input <- tempfile(fileext = ".tsv")
   output_dir <- tempfile()

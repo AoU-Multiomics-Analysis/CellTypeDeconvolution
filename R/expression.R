@@ -179,7 +179,15 @@ annotation_for_expression <- function(expression, annotation, expression_type) {
     }
   }
 
-  annotation[match(rownames(expression), annotation$gene_id), , drop = FALSE]
+  matching_indices <- match(rownames(expression), annotation$gene_id)
+  matching_annotation <- annotation[matching_indices, , drop = FALSE]
+  missing_annotation <- is.na(matching_indices)
+  if (any(missing_annotation)) {
+    matching_annotation$gene_id[missing_annotation] <-
+      rownames(expression)[missing_annotation]
+    matching_annotation$gene_symbol[missing_annotation] <- NA_character_
+  }
+  matching_annotation
 }
 
 make_mapping_report <- function(expression, annotation) {

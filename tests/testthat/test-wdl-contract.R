@@ -499,12 +499,25 @@ testthat::test_that("the logging checker checks brace-form commands", {
     "python3", c(checker_path, complete_fixture),
     stdout = FALSE, stderr = FALSE
   )
+  testthat::expect_false(identical(incomplete_status, 0L))
+  testthat::expect_identical(complete_status, 0L)
+})
+
+testthat::test_that("the complete brace-form fixture is valid WDL", {
+  testthat::skip_if(
+    !nzchar(Sys.which("miniwdl")),
+    "miniwdl is checked in the runner static-check step"
+  )
+  complete_fixture <- tempfile(fileext = ".wdl")
+  writeLines(c(
+    "version 1.1", "task CompleteBraceLogging {", "  command {",
+    "    echo 'stage=brace start_time=now completion_time=now dimensions=1 outputs=result'",
+    "  }", "}"
+  ), complete_fixture)
   miniwdl_status <- system2(
     "miniwdl", c("check", complete_fixture), stdout = FALSE, stderr = FALSE
   )
 
-  testthat::expect_false(identical(incomplete_status, 0L))
-  testthat::expect_identical(complete_status, 0L)
   testthat::expect_identical(miniwdl_status, 0L)
 })
 

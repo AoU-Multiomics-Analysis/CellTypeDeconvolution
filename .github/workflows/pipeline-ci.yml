@@ -40,8 +40,8 @@ jobs:
       - name: R checks
         run: |
           set -euo pipefail
-          docker run --rm -v "$PWD:/workspace" celltype-deconvolution:test Rscript tools/lint_r.R
-          docker run --rm -v "$PWD:/workspace" celltype-deconvolution:test Rscript tests/testthat.R
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/workspace" celltype-deconvolution:test Rscript tools/lint_r.R
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/workspace" celltype-deconvolution:test Rscript tests/testthat.R
 
       - name: Run dtangle smoke workflow
         run: |

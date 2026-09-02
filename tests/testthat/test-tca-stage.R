@@ -145,7 +145,7 @@ testthat::test_that("one model fits all genes without refitting weights", {
   testthat::skip_if_not_installed("TCA")
   testthat::expect_identical(as.character(utils::packageVersion("TCA")), "1.2.1")
   set.seed(20260901)
-  data <- TCA::test_data(20, 24, 3, 0, 0, 0.01)
+  data <- TCA::test_data(24, 20, 3, 0, 0, 0.01)
 
   result <- fit_tca_stage(
     X = data$X,

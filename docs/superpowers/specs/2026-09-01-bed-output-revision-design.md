@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-01
 
-**Status:** Approved in conversation; written review pending
+**Status:** Approved
 
 ## Scope
 
@@ -219,6 +219,6 @@ The documentation will state that:
 - Each retained group has exactly one coordinate-preserving BED.GZ output.
 - Every BED output preserves the original modeled-gene and sample order.
 - BED values match the corresponding in-memory TCA matrix.
-- HDF5 and sharding are absent from the active workflow, image dependency set, tests, and user documentation.
+- No active HDF5 or sharding implementation contract remains in the workflow, image dependency set, tests, or user documentation. A migration note may state that these outputs were removed.
 - Local static checks pass.
 - The GitHub Actions image build and both smoke workflows pass before release.

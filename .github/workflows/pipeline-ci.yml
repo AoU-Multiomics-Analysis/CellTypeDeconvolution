@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           run_directory="$PWD/ci-runs/dtangle"
-          docker run --rm \
+          docker run --rm --group-add "$(id -g)" \
             -v "$PWD:$PWD" \
             -w "$PWD" \
             "celltype-deconvolution:test" \
@@ -83,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           run_directory="$PWD/ci-runs/restart"
-          docker run --rm \
+          docker run --rm --group-add "$(id -g)" \
             -v "$PWD:$PWD" \
             -w "$PWD" \
             "celltype-deconvolution:test" \

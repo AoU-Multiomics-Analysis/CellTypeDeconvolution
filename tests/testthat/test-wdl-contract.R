@@ -271,3 +271,21 @@ testthat::test_that("the logging checker checks brace-form commands", {
   testthat::expect_identical(complete_status, 0L)
   testthat::expect_identical(miniwdl_status, 0L)
 })
+
+testthat::test_that("pipeline CI keeps the runner group for smoke assertions", {
+  workflow_path <- testthat::test_path(
+    "../..", ".github", "workflows", "pipeline-ci.yml"
+  )
+  workflow <- paste(readLines(workflow_path, warn = FALSE), collapse = "\n")
+
+  assertions <- stringr::str_extract_all(
+    workflow,
+    "(?s)- name: Assert .*? smoke outputs\\n.*?(?=\\n      - name:|\\z)"
+  )[[1L]]
+
+  testthat::expect_length(assertions, 2L)
+  purrr::walk(
+    assertions,
+    ~ testthat::expect_match(.x, "--group-add \\\"\\$\\(id -g\\)\\\"", fixed = FALSE)
+  )
+})

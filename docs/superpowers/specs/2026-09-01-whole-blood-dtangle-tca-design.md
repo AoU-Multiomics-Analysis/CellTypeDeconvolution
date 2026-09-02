@@ -2,7 +2,7 @@
 
 Date: 2026-09-01
 
-Status: Approved design
+Status: Approved design, revised for CPM and GTF input
 
 ## Purpose
 
@@ -15,7 +15,7 @@ The target cohort has approximately 9,000 samples.
 The workflow will:
 
 - Run on Terra with WDL.
-- Accept raw counts or TPM as input.
+- Accept a normalized linear CPM matrix and a GTF annotation as input.
 - Accept LM22 at run time. The repository will not distribute LM22.
 - Estimate 22 relative cell-type proportions with the open-source dtangle R package.
 - Combine the 22 proportions into major whole-blood groups.
@@ -36,6 +36,8 @@ The first version will not:
 - Require CD4, CD8, or any other group to remain after filtering.
 - Run source-specific association tests with `tcareg()`.
 - Redistribute LM22.
+- Convert raw counts to CPM or derive expression-normalization lengths.
+- Filter genes by `gene_type` or `gene_biotype`.
 
 ## Selected Approach
 
@@ -55,12 +57,12 @@ The standard LM22 file contains non-log, linear expression values. It contains 5
 
 The workflow will therefore use:
 
-- `log2(TPM + 1)` for the bulk RNA-seq mixtures.
+- `log2(CPM)` for the bulk RNA-seq mixtures.
 - `log2(LM22)` for the standard LM22 reference.
 
-The workflow will not add a pseudocount to LM22 because the standard matrix contains positive values. It will stop if an LM22 value is zero or negative.
+The workflow will not add a pseudocount to either matrix. It will require every prepared CPM value and every LM22 value to be finite and strictly positive before transformation. It will stop when a value is zero or negative. Filtering a gene as expressed does not replace this matrix-wide validation.
 
-The workflow will not apply quantile normalization by default. The dtangle stage will use TPM normalization and the scale conversions above. Quantile normalization will be an optional sensitivity setting and will be off by default. When enabled, the workflow will join the log-scale reference and mixture profiles by their shared genes and use `limma::normalizeBetweenArrays()` once on the combined matrix. This setting will apply only to the dtangle input. It will never change the TCA input matrix.
+The workflow will not renormalize the supplied CPM values. It will not apply quantile normalization by default. Quantile normalization will be an optional sensitivity setting and will be off by default. When enabled, the workflow will join the log-scale reference and mixture profiles by their shared genes and use `limma::normalizeBetweenArrays()` once on the combined matrix. This setting will apply only to the dtangle input. It will never change the TCA input matrix.
 
 The workflow will run `dtangle()` with:
 
@@ -73,7 +75,7 @@ The workflow will save the marker genes, number of markers, and fitted `gamma` v
 
 ### TCA model
 
-TCA will receive the original `log2(TPM + 1)` matrix. Therefore, the TCA results are inferred log-expression values. They are not counts, raw TPM, or absolute expression measurements.
+TCA will receive the complete prepared `log2(CPM)` matrix, not the LM22-intersection matrix. Therefore, the TCA results are inferred log-expression values. They are not counts, linear CPM, or absolute expression measurements.
 
 For each gene and sample, TCA models the bulk value as a weighted mixture of cell-type-specific values. The sample weights are the combined dtangle proportions. The first version will set `refit_W = FALSE`, so TCA will not change these proportions.
 
@@ -85,21 +87,13 @@ TCA requires all retained weights to be positive and each sample row to sum to o
 
 ### Required inputs
 
-- A gene-by-sample expression matrix in TSV or compressed TSV format.
-- `expression_type`, with value `counts` or `tpm`.
+- A gene-by-sample linear CPM matrix in TSV or compressed TSV format. Its first column must be `gene_id`.
+- A GTF or compressed GTF with `gene` records that contain `gene_id` and `gene_name` attributes.
 
 The user must also select one proportion-input mode:
 
 1. dtangle mode requires a user-supplied LM22 signature matrix.
 2. Restart mode requires a precomputed 22-type dtangle proportion table with one sample identifier column and all 22 LM22 proportion columns.
-
-For count input, a gene annotation table is also required. It must contain:
-
-- `gene_id`
-- `gene_symbol`
-- `gene_length_bp`
-
-For TPM input, a gene annotation table is optional when the matrix already uses unique gene symbols.
 
 ### Optional inputs
 
@@ -118,21 +112,23 @@ For TPM input, a gene annotation table is optional when the matrix already uses 
 
 The expression matrix will use genes as rows and samples as columns. The workflow will preserve the sample order after it validates the identifiers.
 
-For count input, the workflow will:
+The workflow will:
 
-1. Divide each gene count by its length in kilobases.
-2. Normalize the rates in each sample to one million.
-3. Map gene identifiers to gene symbols.
-4. Sum TPM values when more than one gene identifier maps to the same symbol.
-5. Remove unmapped genes and normalize the remaining values in each sample to one million.
-
-For TPM input, the workflow will validate nonnegative values. If annotation is supplied, it will map identifiers to symbols and sum duplicate symbols. After symbol resolution, it will normalize each sample to one million.
+1. Stream the GTF and retain its `gene` records.
+2. Extract `gene_id` and `gene_name` attributes. It may record `gene_type` or `gene_biotype`, but it will not filter on them.
+3. Match expression identifiers to GTF `gene_id` values by exact trimmed text.
+4. Remove and report expression genes without a usable `gene_name`.
+5. Sum CPM values when more than one gene identifier maps to the same gene name.
+6. Preserve the supplied CPM scale without renormalizing after mapping or collapse.
+7. Stop unless every prepared CPM value is finite and strictly positive.
 
 The workflow will make one primary transformed matrix:
 
-- `log2(TPM + 1)` for dtangle mixtures and TCA.
+- `log2(CPM)` for dtangle mixtures and TCA.
 
-The workflow will keep linear TPM as a supporting output. It will create a separate dtangle working matrix that contains only genes shared with LM22. Optional quantile normalization, when enabled, will change only this working matrix.
+The workflow will keep linear CPM as a supporting output. It will create a separate dtangle working matrix that contains only genes shared with LM22. It will preserve LM22 gene order in both aligned matrices and verify that the gene columns are identical. Optional quantile normalization, when enabled, will change only this dtangle working matrix.
+
+TCA will use the complete mapped expression matrix after constant genes are removed. The LM22 gene intersection will not limit TCA features.
 
 Genes that are constant across all samples will not enter TCA. The workflow will record each removed gene and its removal reason.
 
@@ -163,14 +159,15 @@ The workflow will combine the 22 dtangle proportions as follows:
 | B cells | B cells naive; B cells memory; Plasma cells |
 | CD4 T cells | T cells CD4 naive; T cells CD4 memory resting; T cells CD4 memory activated; T cells follicular helper; T cells regulatory (Tregs) |
 | CD8 T cells | T cells CD8 |
+| Gamma-delta T cells | T cells gamma delta |
 | NK cells | NK cells resting; NK cells activated |
 | Monocyte/myeloid | Monocytes; Macrophages M0; Macrophages M1; Macrophages M2 |
 | Neutrophils | Neutrophils |
 | Eosinophils | Eosinophils |
 | Dendritic cells | Dendritic cells resting; Dendritic cells activated |
-| Other LM22 | T cells gamma delta; Mast cells resting; Mast cells activated |
+| Mast cells | Mast cells resting; Mast cells activated |
 
-The `Other LM22` name is intentional. This group contains only the listed LM22 members. It does not represent all cell types that LM22 does not model.
+T follicular helper and regulatory T cells are included in the CD4 lineage. Gamma-delta T cells remain separate because they are not conventional CD4 or CD8 T cells. Mast cells also remain separate instead of being combined with an unrelated lineage. Cohort filtering can remove either group when it is too rare.
 
 After grouping, the workflow will calculate the cohort mean for each group. It will remove a group when its mean is less than `0.0001`. This rule applies to all groups. No group is mandatory.
 
@@ -238,15 +235,16 @@ Each HDF5 output will contain:
 - Gene identifiers.
 - Sample identifiers.
 - The cell-group name.
-- The scale value `log2_tpm_plus_1`.
+- The scale value `log2_cpm`.
 - Pipeline and model version attributes.
 
 Compressed TSV matrices will be optional because they can use substantially more storage and transfer time than HDF5 at this cohort size.
 
 ### Supporting outputs
 
-- Prepared linear TPM.
-- Prepared `log2(TPM + 1)`.
+- Prepared linear CPM.
+- Prepared `log2(CPM)`.
+- GTF gene-mapping and duplicate-resolution report.
 - The transformed LM22 matrix used by dtangle.
 - The dtangle shared-gene matrix.
 - The dtangle marker table and model metadata.
@@ -262,8 +260,9 @@ Compressed TSV matrices will be optional because they can use substantially more
 The workflow will stop for these conditions:
 
 - Duplicate sample identifiers.
-- Missing, negative, or nonnumeric expression values.
-- Missing or invalid gene lengths for count input.
+- Missing, zero, negative, nonnumeric, or nonfinite prepared CPM values.
+- A missing or malformed GTF, missing `gene` records, or missing `gene_id` or `gene_name` attributes.
+- Duplicate GTF `gene_id` values or no mapped expression genes.
 - Sample mismatches between expression, precomputed proportions, and covariates.
 - Missing LM22 columns that prevent the approved 22-type model or group mapping.
 - Duplicate LM22 gene symbols.
@@ -299,7 +298,7 @@ The quality-control results will include:
 - Summary distributions of reconstruction metrics.
 - Software versions, container identifiers, parameters, and file checksums.
 
-The reconstructed bulk value for TCA quality control will be the proportion-weighted sum of the inferred cell-type values. When technical covariates are supplied, the reconstruction will also include the fitted mixture-level covariate term. This comparison will use the same `log2(TPM + 1)` scale as the TCA input.
+The reconstructed bulk value for TCA quality control will be the proportion-weighted sum of the inferred cell-type values. When technical covariates are supplied, the reconstruction will also include the fitted mixture-level covariate term. This comparison will use the same `log2(CPM)` scale as the TCA input.
 
 Plots will use a clean, minimal style. They will not contain titles or subtitles.
 
@@ -322,8 +321,9 @@ The dtangle log will also record the shared-gene count, marker count for each ce
 
 Unit tests will cover:
 
-- Count-to-TPM conversion.
-- Gene mapping and duplicate handling.
+- Streaming GTF gene-attribute parsing, including compressed input.
+- CPM-to-gene-name mapping and duplicate handling without renormalization.
+- Strict positive-CPM validation and the `log2(CPM)` conversion.
 - LM22 structure and scale validation.
 - The `log2(LM22)` conversion.
 - Bulk and LM22 gene matching.
@@ -373,7 +373,7 @@ A local Docker build will not be required for the standard development smoke tes
 The repository will contain:
 
 - Dockstore metadata for the top-level WDL workflow.
-- Example JSON input files for count, TPM, and precomputed-proportion modes.
+- Example JSON input files for CPM dtangle and precomputed-proportion modes.
 - A Terra run guide.
 - A data dictionary for all input and output tables.
 - Guidance for setting CPU, memory, disk, retry, and preemptible values.
@@ -386,11 +386,13 @@ Initial run-time defaults will target a 9,000-sample cohort. Users will be able 
 - LM22 was developed from microarray data, while the target mixtures are RNA-seq. The log-scale conversion does not remove every cross-platform effect.
 - The default workflow does not apply quantile normalization or another batch-correction method between LM22 and the mixtures.
 - LM22 does not model all whole-blood components. In particular, the selected grouping does not add erythrocyte or platelet expression.
-- The `Other LM22` group is not a complete unmodeled-cell category.
 - The monocyte/myeloid group includes LM22 macrophage states, although circulating whole blood usually has few macrophages.
 - dtangle estimates proportions only. TCA performs the separate cell-type-specific expression inference.
 - TCA results are statistical estimates. They are not measurements from sorted cells.
-- TCA will operate in log-expression space. Its results must not be labeled as TPM.
+- The input CPM matrix must already be normalized. The workflow does not calculate CPM from raw counts.
+- The workflow requires strictly positive prepared CPM values because it does not add a pseudocount. A cohort-level expressed-gene filter may still leave sample-specific zeros, which will stop the workflow.
+- The workflow matches expression and GTF gene identifiers exactly after trimming. Identifier-version differences must be resolved before the run.
+- TCA will operate in `log2(CPM)` space. Its results must not be labeled as linear CPM.
 - Group retention is cohort-specific. Two cohorts can produce different sets of output matrices.
 - Very small retained proportions can produce unstable estimates even after exact zero adjustment.
 

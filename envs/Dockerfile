@@ -6,6 +6,7 @@ RUN micromamba install --yes --name base --file /tmp/environment.yml && \
 
 COPY --chown=$MAMBA_USER:$MAMBA_USER R /opt/celltype/R
 COPY --chown=$MAMBA_USER:$MAMBA_USER scripts /opt/celltype/scripts
+ENV PATH=/opt/conda/bin:$PATH
 ENV R_LIBS_USER=/opt/conda/lib/R/library
 
 ARG MAMBA_DOCKERFILE_ACTIVATE=1

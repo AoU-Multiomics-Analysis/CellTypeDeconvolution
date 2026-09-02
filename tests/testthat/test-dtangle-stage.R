@@ -123,6 +123,56 @@ testthat::test_that("dtangle input preparation preserves LM22 and official order
   testthat::expect_identical(colnames(inputs$references), rownames(lm22))
 })
 
+testthat::test_that("finite negative log2 CPM values are accepted", {
+  lm22 <- make_synthetic_lm22()
+  bulk_log <- matrix(
+    seq(-3, 3, length.out = nrow(lm22)), ncol = 1,
+    dimnames = list(rev(rownames(lm22)), "S1")
+  )
+  inputs <- prepare_dtangle_inputs(bulk_log, lm22, 0.80, FALSE)
+  testthat::expect_identical(colnames(inputs$Y), rownames(lm22))
+  testthat::expect_identical(colnames(inputs$references), rownames(lm22))
+})
+
+testthat::test_that("nonfinite log2 CPM values are rejected", {
+  lm22 <- make_synthetic_lm22()
+  bulk_log <- matrix(
+    1,
+    nrow = nrow(lm22),
+    ncol = 1,
+    dimnames = list(rownames(lm22), "S1")
+  )
+  bulk_log[1L, 1L] <- Inf
+
+  testthat::expect_error(
+    prepare_dtangle_inputs(bulk_log, lm22, 0.80, FALSE),
+    "log2\\(CPM\\).*finite"
+  )
+})
+
+testthat::test_that("synthetic CPM mixtures use log2 without a pseudocount", {
+  reference <- make_synthetic_lm22()
+  weights <- matrix(rexp(8 * 22), nrow = 8,
+                    dimnames = list(paste0("S", 1:8), lm22_cell_types()))
+  weights <- weights / rowSums(weights)
+  bulk_cpm <- reference %*% t(weights)
+  inputs <- prepare_dtangle_inputs(log2(bulk_cpm), reference, 0.80, FALSE)
+  testthat::expect_equal(inputs$shared_bulk, log2(bulk_cpm))
+})
+
+testthat::test_that("overlap report lists every LM22 gene in reference order", {
+  lm22 <- make_synthetic_lm22()
+  kept <- rownames(lm22)[-c(2L, 5L)]
+  bulk_log <- matrix(1, nrow = length(kept), ncol = 1,
+                     dimnames = list(rev(kept), "S1"))
+  inputs <- prepare_dtangle_inputs(bulk_log, lm22, 0.80, FALSE)
+  testthat::expect_identical(inputs$overlap_report$gene_symbol, rownames(lm22))
+  testthat::expect_identical(
+    inputs$overlap_report$matched,
+    rownames(lm22) %in% kept
+  )
+})
+
 testthat::test_that("joint quantile normalization uses joined log-scale profiles", {
   lm22 <- make_synthetic_lm22()
   bulk_log <- matrix(
@@ -142,9 +192,56 @@ testthat::test_that("joint quantile normalization uses joined log-scale profiles
 
   testthat::expect_equal(inputs$references, t(expected[, lm22_cell_types()]))
   testthat::expect_equal(inputs$Y, t(expected[, c("S1", "S2")]))
+  testthat::expect_equal(
+    inputs$transformed_lm22,
+    expected[, seq_len(ncol(lm22)), drop = FALSE]
+  )
+})
+
+testthat::test_that("joint quantile normalization preserves colliding sample identifiers", {
+  lm22 <- make_synthetic_lm22()
+  sample_id <- lm22_cell_types()[[1L]]
+  bulk_log <- matrix(
+    seq(1, 2, length.out = nrow(lm22)),
+    nrow = nrow(lm22),
+    ncol = 1,
+    dimnames = list(rownames(lm22), sample_id)
+  )
+
+  inputs <- prepare_dtangle_inputs(
+    bulk_log,
+    lm22,
+    min_overlap = 0.80,
+    quantile_normalize = TRUE
+  )
+  expected <- limma::normalizeBetweenArrays(cbind(log2(lm22), bulk_log))
+
+  testthat::expect_identical(rownames(inputs$Y), sample_id)
+  testthat::expect_equal(inputs$Y, t(expected[, 23L, drop = FALSE]))
+})
+
+testthat::test_that("dtangle estimation requires version 2.0.10", {
+  testthat::skip_if_not_installed("dtangle")
+  testthat::expect_equal(validate_dtangle_version(), "2.0.10")
+})
+
+testthat::test_that("dtangle estimation supports only ratio markers", {
+  inputs <- list(
+    Y = matrix(1, nrow = 1, ncol = 1),
+    references = matrix(1, nrow = 1, ncol = 1),
+    overlap_report = tibble::tibble(
+      gene_symbol = "G1", reference_index = 1L, matched = TRUE
+    )
+  )
+
+  testthat::expect_error(
+    estimate_dtangle(inputs, marker_method = "diff"),
+    "marker_method.*ratio"
+  )
 })
 
 testthat::test_that("dtangle returns normalized proportions and nonempty markers", {
+  testthat::skip_if_not_installed("dtangle")
   set.seed(20260901)
   reference <- make_synthetic_lm22(markers_per_type = 3L, baseline = 4, marker = 1024)
   weights <- matrix(
@@ -176,6 +273,7 @@ testthat::test_that("dtangle returns normalized proportions and nonempty markers
 })
 
 testthat::test_that("the dtangle CLI writes its six declared outputs", {
+  testthat::skip_if_not_installed("dtangle")
   lm22 <- make_synthetic_lm22()
   bulk_log <- matrix(
     log2(5),
@@ -188,7 +286,7 @@ testthat::test_that("the dtangle CLI writes its six declared outputs", {
   output_dir <- tempfile()
   dir.create(output_dir)
   write_numeric_matrix(lm22, lm22_path, "gene_symbol")
-  write_numeric_matrix(bulk_log, bulk_path, "gene_symbol")
+  write_numeric_matrix(bulk_log, bulk_path, "gene_name")
   original_working_directory <- setwd(pipeline_root)
   on.exit(setwd(original_working_directory), add = TRUE)
 

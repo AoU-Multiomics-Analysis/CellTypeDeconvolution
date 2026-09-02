@@ -12,7 +12,7 @@ run_dtangle_stage <- function() {
       "--bulk-log",
       dest = "bulk_log",
       type = "character",
-      help = "Gene-by-sample log2(TPM + 1) matrix TSV with gene_symbol first column."
+      help = "Gene-by-sample log2(CPM) matrix TSV with gene_name first column."
     ),
     optparse::make_option(
       "--lm22",
@@ -32,6 +32,13 @@ run_dtangle_stage <- function() {
       type = "double",
       default = pipeline_defaults()$marker_fraction,
       help = "Fraction of reference genes used as dtangle markers."
+    ),
+    optparse::make_option(
+      "--marker-method",
+      dest = "marker_method",
+      type = "character",
+      default = "ratio",
+      help = "dtangle marker method; only ratio is supported."
     ),
     optparse::make_option(
       "--quantile-normalize",
@@ -62,11 +69,21 @@ run_dtangle_stage <- function() {
   }
 
   message(sprintf("stage=dtangle utc_start=%s", utc_time()))
-  bulk_log <- read_numeric_matrix(options$bulk_log, "gene_symbol")
+  bulk_log <- read_numeric_matrix(options$bulk_log, "gene_name")
   lm22_linear <- read_numeric_matrix(options$lm22, "gene_symbol")
   message(sprintf(
     "stage=dtangle bulk_dimensions=genes:%d samples:%d lm22_dimensions=genes:%d cell_types:%d",
     nrow(bulk_log), ncol(bulk_log), nrow(lm22_linear), ncol(lm22_linear)
+  ))
+  message(sprintf(
+    paste0(
+      "stage=dtangle settings=min_overlap:%.3f marker_fraction:%.3f ",
+      "marker_method:%s quantile_normalize:%s"
+    ),
+    options$min_overlap,
+    options$marker_fraction,
+    options$marker_method,
+    options$quantile_normalize
   ))
   inputs <- prepare_dtangle_inputs(
     bulk_log = bulk_log,
@@ -74,7 +91,22 @@ run_dtangle_stage <- function() {
     min_overlap = options$min_overlap,
     quantile_normalize = options$quantile_normalize
   )
-  fit <- estimate_dtangle(inputs, marker_fraction = options$marker_fraction)
+  message(sprintf(
+    "stage=dtangle overlap=shared_genes:%d overlap_fraction:%.3f",
+    inputs$overlap_count,
+    inputs$overlap_fraction
+  ))
+  fit <- estimate_dtangle(
+    inputs,
+    marker_fraction = options$marker_fraction,
+    marker_method = options$marker_method
+  )
+  marker_counts <- unlist(fit$metadata$marker_counts, use.names = TRUE)
+  message(sprintf("stage=dtangle package=dtangle version=%s", fit$metadata$dtangle_version))
+  message(sprintf(
+    "stage=dtangle markers_per_cell_type=%s",
+    paste(sprintf("%s:%d", names(marker_counts), marker_counts), collapse = ",")
+  ))
 
   dir.create(options$output_dir, recursive = TRUE, showWarnings = FALSE)
   output_paths <- list(

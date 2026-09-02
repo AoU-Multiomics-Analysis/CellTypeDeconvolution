@@ -46,6 +46,25 @@ transform_lm22 <- function(lm22_linear) {
   log2(standardize_lm22(lm22_linear))
 }
 
+validate_dtangle_version <- function() {
+  required_version <- "2.0.10"
+  if (!requireNamespace("dtangle", quietly = TRUE)) {
+    stop("The dtangle package is required for proportion estimation", call. = FALSE)
+  }
+  observed_version <- as.character(utils::packageVersion("dtangle"))
+  if (!identical(observed_version, required_version)) {
+    stop(
+      sprintf(
+        "dtangle version %s is required; found %s",
+        required_version, observed_version
+      ),
+      call. = FALSE
+    )
+  }
+
+  observed_version
+}
+
 validate_bulk_log <- function(bulk_log) {
   if (!is.matrix(bulk_log) || !is.numeric(bulk_log)) {
     stop("Bulk log expression must be a numeric matrix", call. = FALSE)
@@ -67,10 +86,7 @@ validate_bulk_log <- function(bulk_log) {
     stop("Bulk log expression sample identifiers must be unique and non-empty", call. = FALSE)
   }
   if (any(!is.finite(bulk_log))) {
-    stop("Bulk log expression values must be finite", call. = FALSE)
-  }
-  if (any(bulk_log < 0)) {
-    stop("Bulk log expression values must be nonnegative", call. = FALSE)
+    stop("Bulk log2(CPM) values must be finite", call. = FALSE)
   }
 
   bulk_log
@@ -98,10 +114,13 @@ prepare_dtangle_inputs <- function(
 
   transformed_lm22 <- transform_lm22(lm22_linear)
   bulk_log <- standardize_bulk_log(bulk_log)
-  shared_genes <- rownames(transformed_lm22)[
-    rownames(transformed_lm22) %in% rownames(bulk_log)
-  ]
-  overlap_fraction <- length(shared_genes) / nrow(transformed_lm22)
+  overlap_report <- tibble::tibble(
+    gene_symbol = rownames(transformed_lm22),
+    reference_index = seq_len(nrow(transformed_lm22)),
+    matched = rownames(transformed_lm22) %in% rownames(bulk_log)
+  )
+  overlap_count <- sum(overlap_report$matched)
+  overlap_fraction <- overlap_count / nrow(transformed_lm22)
   if (overlap_fraction < min_overlap) {
     stop(
       sprintf("LM22 overlap %.3f is below %.3f.", overlap_fraction, min_overlap),
@@ -109,33 +128,43 @@ prepare_dtangle_inputs <- function(
     )
   }
 
+  shared_genes <- overlap_report$gene_symbol[overlap_report$matched]
   shared_lm22 <- transformed_lm22[shared_genes, , drop = FALSE]
   shared_bulk <- bulk_log[match(shared_genes, rownames(bulk_log)), , drop = FALSE]
   if (isTRUE(quantile_normalize)) {
+    reference_profile_count <- ncol(shared_lm22)
+    bulk_profile_count <- ncol(shared_bulk)
     joined_profiles <- cbind(shared_lm22, shared_bulk)
     normalized_profiles <- limma::normalizeBetweenArrays(joined_profiles)
-    shared_lm22 <- normalized_profiles[, colnames(shared_lm22), drop = FALSE]
-    shared_bulk <- normalized_profiles[, colnames(shared_bulk), drop = FALSE]
+    shared_lm22 <- normalized_profiles[
+      , seq_len(reference_profile_count), drop = FALSE
+    ]
+    shared_bulk <- normalized_profiles[
+      , reference_profile_count + seq_len(bulk_profile_count), drop = FALSE
+    ]
   }
+  if (!identical(colnames(t(shared_bulk)), colnames(t(shared_lm22)))) {
+    stop("Aligned dtangle gene columns are not identical", call. = FALSE)
+  }
+  transformed_lm22 <- shared_lm22
 
   list(
     Y = t(shared_bulk),
     references = t(shared_lm22),
     transformed_lm22 = transformed_lm22,
     shared_bulk = shared_bulk,
-    overlap_report = tibble::tibble(
-      reference_gene_count = nrow(transformed_lm22),
-      overlap_count = length(shared_genes),
-      overlap_fraction = overlap_fraction,
-      min_overlap = min_overlap,
-      quantile_normalize = quantile_normalize
-    )
+    overlap_report = overlap_report,
+    overlap_count = overlap_count,
+    overlap_fraction = overlap_fraction,
+    min_overlap = min_overlap,
+    quantile_normalize = quantile_normalize
   )
 }
 
 estimate_dtangle <- function(
     inputs,
-    marker_fraction = pipeline_defaults()$marker_fraction) {
+    marker_fraction = pipeline_defaults()$marker_fraction,
+    marker_method = "ratio") {
   if (!is.list(inputs) || !all(c("Y", "references", "overlap_report") %in% names(inputs))) {
     stop("inputs must be returned by prepare_dtangle_inputs", call. = FALSE)
   }
@@ -143,16 +172,18 @@ estimate_dtangle <- function(
       !is.finite(marker_fraction) || marker_fraction <= 0 || marker_fraction > 1) {
     stop("marker_fraction must be a finite value in (0, 1]", call. = FALSE)
   }
-  if (!requireNamespace("dtangle", quietly = TRUE)) {
-    stop("The dtangle package is required for proportion estimation", call. = FALSE)
+  if (!is.character(marker_method) || length(marker_method) != 1L ||
+      is.na(marker_method) || marker_method != "ratio") {
+    stop("marker_method must be the supported value 'ratio'", call. = FALSE)
   }
+  dtangle_version <- validate_dtangle_version()
 
   fit <- dtangle::dtangle(
     Y = inputs$Y,
     references = inputs$references,
     n_markers = marker_fraction,
     data_type = "rna-seq",
-    marker_method = "ratio"
+    marker_method = marker_method
   )
   selected_marker_counts <- lengths(fit$markers)
   if (length(selected_marker_counts) != nrow(inputs$references) ||
@@ -187,15 +218,16 @@ estimate_dtangle <- function(
       )
     }
   )
-  overlap <- inputs$overlap_report[1, , drop = FALSE]
+  marker_counts <- stats::setNames(selected_marker_counts, rownames(inputs$references))
   metadata <- list(
-    dtangle_version = as.character(utils::packageVersion("dtangle")),
+    dtangle_version = dtangle_version,
     gamma = unname(fit$gamma),
-    marker_method = "ratio",
+    marker_method = marker_method,
     marker_fraction = marker_fraction,
-    overlap_count = overlap$overlap_count,
-    overlap_fraction = overlap$overlap_fraction,
-    quantile_normalize = overlap$quantile_normalize,
+    marker_counts = as.list(marker_counts),
+    overlap_count = inputs$overlap_count,
+    overlap_fraction = inputs$overlap_fraction,
+    quantile_normalize = inputs$quantile_normalize,
     sample_count = nrow(inputs$Y),
     reference_dimensions = list(
       cell_types = nrow(inputs$references),

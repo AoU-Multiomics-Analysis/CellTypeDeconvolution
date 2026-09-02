@@ -1,0 +1,107 @@
+name: Pipeline CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  test-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install miniwdl
+        run: |
+          set -euo pipefail
+          pipx install "miniwdl==1.15.0"
+          miniwdl --version
+
+      - name: Static checks
+        run: |
+          set -euo pipefail
+          miniwdl check workflows/cell_type_deconvolution.wdl
+          python3 tools/check_wdl_logging.py workflows
+
+      - name: Build test image
+        run: |
+          set -euo pipefail
+          docker build \
+            --file "envs/Dockerfile" \
+            --tag "celltype-deconvolution:test" \
+            "."
+
+      - name: R checks
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/workspace" celltype-deconvolution:test Rscript tools/lint_r.R
+          docker run --rm -v "$PWD:/workspace" celltype-deconvolution:test Rscript tests/testthat.R
+
+      - name: Run dtangle smoke workflow
+        run: |
+          set -euo pipefail
+          run_directory="$PWD/ci-runs/dtangle"
+          mkdir -p "$run_directory"
+          miniwdl run \
+            "workflows/cell_type_deconvolution.wdl" \
+            --input "tests/fixtures/dtangle.inputs.json" \
+            --dir "$run_directory/." \
+            --verbose \
+            --no-color
+
+      - name: Assert dtangle smoke outputs
+        run: |
+          set -euo pipefail
+          run_directory="$PWD/ci-runs/dtangle"
+          docker run --rm \
+            -v "$PWD:$PWD" \
+            -w "$PWD" \
+            "celltype-deconvolution:test" \
+            Rscript "tests/smoke/assert_outputs.R" \
+            "$run_directory/outputs.json" \
+            "$PWD/tests/fixtures"
+
+      - name: Run restart smoke workflow
+        run: |
+          set -euo pipefail
+          run_directory="$PWD/ci-runs/restart"
+          mkdir -p "$run_directory"
+          miniwdl run \
+            "workflows/cell_type_deconvolution.wdl" \
+            --input "tests/fixtures/restart.inputs.json" \
+            --dir "$run_directory/." \
+            --verbose \
+            --no-color
+
+      - name: Assert restart smoke outputs
+        run: |
+          set -euo pipefail
+          run_directory="$PWD/ci-runs/restart"
+          docker run --rm \
+            -v "$PWD:$PWD" \
+            -w "$PWD" \
+            "celltype-deconvolution:test" \
+            Rscript "tests/smoke/assert_outputs.R" \
+            "$run_directory/outputs.json" \
+            "$PWD/tests/fixtures"
+
+      - name: Upload failure logs and QC artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-ci-failure-${{ github.run_id }}
+          path: |
+            ci-runs/**/*.log
+            ci-runs/**/stdout.txt
+            ci-runs/**/stderr.txt
+            ci-runs/**/error.json
+            ci-runs/**/outputs.json
+            ci-runs/**/qc_summary.tsv
+            ci-runs/**/qc_plots.pdf
+          if-no-files-found: warn

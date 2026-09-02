@@ -2,9 +2,8 @@
 
 <!-- workflow-badges:start -->
 [![Docker Image CI](https://github.com/AoU-Multiomics-Analysis/CellTypeDeconvolution/actions/workflows/docker-image.yml/badge.svg)](https://github.com/AoU-Multiomics-Analysis/CellTypeDeconvolution/actions/workflows/docker-image.yml)
-[![R lint](https://github.com/AoU-Multiomics-Analysis/CellTypeDeconvolution/actions/workflows/r-lint.yml/badge.svg)](https://github.com/AoU-Multiomics-Analysis/CellTypeDeconvolution/actions/workflows/r-lint.yml)
+[![Pipeline CI](https://github.com/AoU-Multiomics-Analysis/CellTypeDeconvolution/actions/workflows/pipeline-ci.yml/badge.svg)](https://github.com/AoU-Multiomics-Analysis/CellTypeDeconvolution/actions/workflows/pipeline-ci.yml)
 [![Update README workflow badges](https://github.com/AoU-Multiomics-Analysis/CellTypeDeconvolution/actions/workflows/update-readme-badges.yml/badge.svg)](https://github.com/AoU-Multiomics-Analysis/CellTypeDeconvolution/actions/workflows/update-readme-badges.yml)
-[![WDL validation](https://github.com/AoU-Multiomics-Analysis/CellTypeDeconvolution/actions/workflows/wdl-validation.yml/badge.svg)](https://github.com/AoU-Multiomics-Analysis/CellTypeDeconvolution/actions/workflows/wdl-validation.yml)
 <!-- workflow-badges:end -->
 
 

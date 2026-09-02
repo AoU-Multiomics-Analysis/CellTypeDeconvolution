@@ -1,5 +1,7 @@
 # Whole-Blood dtangle and TCA Pipeline Implementation Plan
 
+> **Superseded:** Use `docs/superpowers/plans/2026-09-01-cpm-gtf-dtangle-tca-revision.md`. This earlier plan describes the retired counts/TPM interface.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a tested Terra WDL workflow that estimates LM22 cell proportions with dtangle, combines and filters the proportions, and uses TCA to produce sample-specific expression matrices for each retained major cell group.

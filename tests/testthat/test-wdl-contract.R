@@ -31,6 +31,93 @@ testthat::test_that("the expression WDL requires CPM and GTF", {
   testthat::expect_false(grepl("expression_type|gene_length", text))
 })
 
+testthat::test_that("top-level workflow requires CPM and GTF and exposes both proportion modes", {
+  text <- wdl_text("workflows/cell_type_deconvolution.wdl")
+  testthat::expect_match(text, "File expression", fixed = TRUE)
+  testthat::expect_match(text, "File gtf", fixed = TRUE)
+  testthat::expect_match(text, "File[?] lm22")
+  testthat::expect_match(text, "File[?] precomputed_proportions")
+  testthat::expect_match(text, "scatter .*shard")
+  testthat::expect_identical(
+    stringr::str_count(
+      text,
+      stringr::fixed(
+        "prepared_log2_cpm = PrepareExpression.prepared_log2_cpm,"
+      )
+    ),
+    2L
+  )
+  testthat::expect_false(grepl(
+    "prepared_log2_cpm = RunDtangle.shared_bulk",
+    text,
+    fixed = TRUE
+  ))
+  testthat::expect_match(text, "call qc_tasks.BuildManifest", fixed = TRUE)
+  testthat::expect_match(
+    text,
+    "output_inventory = AssembleTca.output_inventory",
+    fixed = TRUE
+  )
+  testthat::expect_match(
+    text,
+    "assembly_qc_plots = AssembleTca.qc_plots",
+    fixed = TRUE
+  )
+  testthat::expect_false(grepl("expression_type|gene_length", text))
+})
+
+testthat::test_that("synthetic smoke fixtures are deterministic and restart without LM22", {
+  generator <- testthat::test_path(
+    "../..", "scripts", "generate_synthetic_fixture.R"
+  )
+  first <- tempfile("fixture-first-")
+  second <- tempfile("fixture-second-")
+  dir.create(first)
+  dir.create(second)
+
+  first_status <- system2("Rscript", c(generator, first))
+  second_status <- system2("Rscript", c(generator, second))
+  testthat::expect_identical(first_status, 0L)
+  testthat::expect_identical(second_status, 0L)
+
+  expected_files <- c(
+    "synthetic_cpm.tsv", "synthetic.gtf", "synthetic_signature.tsv",
+    "batch_indicator.tsv", "precomputed_proportions.tsv",
+    "expected_samples.txt", "expected_genes.txt", "expected_groups.txt",
+    "dtangle.inputs.json", "restart.inputs.json"
+  )
+  first_hashes <- tools::md5sum(file.path(first, expected_files))
+  second_hashes <- tools::md5sum(file.path(second, expected_files))
+  testthat::expect_false(anyNA(first_hashes))
+  testthat::expect_identical(unname(first_hashes), unname(second_hashes))
+
+  cpm <- readr::read_tsv(
+    file.path(first, "synthetic_cpm.tsv"),
+    show_col_types = FALSE
+  )
+  signature <- readr::read_tsv(
+    file.path(first, "synthetic_signature.tsv"),
+    show_col_types = FALSE
+  )
+  testthat::expect_identical(dim(cpm), c(72L, 13L))
+  testthat::expect_true(all(as.matrix(cpm[-1L]) > 0))
+  testthat::expect_lt(
+    max(abs(colSums(as.matrix(cpm[-1L])) - 1e6)),
+    1e-6
+  )
+  testthat::expect_identical(dim(signature), c(66L, 23L))
+
+  gtf <- readLines(file.path(first, "synthetic.gtf"), warn = FALSE)
+  testthat::expect_true(any(grepl('gene_type "protein_coding"', gtf)))
+  testthat::expect_true(any(grepl('gene_type "lncRNA"', gtf)))
+  restart <- jsonlite::read_json(file.path(first, "restart.inputs.json"))
+  testthat::expect_false("cell_type_deconvolution.lm22" %in% names(restart))
+  testthat::expect_identical(
+    restart$cell_type_deconvolution.precomputed_proportions,
+    "tests/fixtures/precomputed_proportions.tsv"
+  )
+})
+
 testthat::test_that("all modular WDL tasks declare CLI-aligned interfaces", {
   expect_task_contract(
     "workflows/tasks/expression.wdl", "PrepareExpression",

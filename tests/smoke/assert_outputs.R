@@ -7,10 +7,6 @@ if (length(arguments) < 1L || length(arguments) > 2L) {
     call. = FALSE
   )
 }
-if (!requireNamespace("hdf5r", quietly = TRUE)) {
-  stop("The hdf5r package is required for smoke assertions", call. = FALSE)
-}
-
 outputs_path <- arguments[[1L]]
 fixture_directory <- if (length(arguments) == 2L) {
   arguments[[2L]]
@@ -68,15 +64,6 @@ expected_groups <- readLines(
   file.path(fixture_directory, "expected_groups.txt"),
   warn = FALSE
 )
-signature_genes <- readr::read_tsv(
-  file.path(fixture_directory, "synthetic_signature.tsv"),
-  col_types = readr::cols(.default = readr::col_character()),
-  show_col_types = FALSE,
-  progress = FALSE
-)$gene_symbol
-non_signature_genes <- setdiff(expected_full_mapped_genes, signature_genes)
-stopifnot(length(non_signature_genes) == 6L)
-
 proportions <- read_matrix_table("proportions_lm22", "sample_id")
 combined <- read_matrix_table("proportions_combined", "sample_id")
 tca_weights <- read_matrix_table("tca_weights", "sample_id")
@@ -92,20 +79,11 @@ stopifnot(identical(expected_samples, rownames(tca_weights)))
 stopifnot(identical(expected_groups, colnames(combined)))
 stopifnot(identical(expected_groups, colnames(tca_weights)))
 
-tca_expression <- read_matrix_table("tca_expression", "gene_name")
+tca_expression <- read_matrix_table("tca_expression", "gene_id")
 observed_genes <- rownames(tca_expression)
 observed_samples <- colnames(tca_expression)
 stopifnot(identical(expected_samples, observed_samples))
 stopifnot(identical(expected_full_mapped_genes, observed_genes))
-stopifnot(any(non_signature_genes %in% observed_genes))
-
-shard_manifest <- readr::read_tsv(
-  output_value("gene_shard_manifest"),
-  show_col_types = FALSE,
-  progress = FALSE
-)
-stopifnot(identical(expected_full_mapped_genes, shard_manifest$gene_name))
-stopifnot(identical(seq_along(expected_full_mapped_genes), shard_manifest$gene_index))
 
 reconstruction <- readr::read_tsv(
   output_value("reconstruction_by_sample"),
@@ -117,37 +95,9 @@ stopifnot(all(reconstruction$gene_count == length(expected_full_mapped_genes)))
 stopifnot(all(is.finite(reconstruction$correlation)))
 stopifnot(all(is.finite(reconstruction$rmse)))
 
-group_hdf5 <- output_value("group_hdf5")
-group_tsv <- output_value("group_tsv")
-stopifnot(length(group_hdf5) == length(expected_groups))
-stopifnot(length(group_tsv) == length(expected_groups))
-
-hdf5_groups <- purrr::map_chr(group_hdf5, function(path) {
-  h5 <- hdf5r::H5File$new(path, mode = "r")
-  on.exit(h5$close_all(), add = TRUE)
-  stopifnot(all(c("expression", "gene_name", "sample_id") %in% names(h5)))
-  genes <- as.character(h5[["gene_name"]][])
-  samples <- as.character(h5[["sample_id"]][])
-  dimensions <- h5[["expression"]]$dims
-  cell_group <- as.character(h5$attr_open("cell_group")$read())
-  scale <- as.character(h5$attr_open("scale")$read())
-  stopifnot(
-    identical(dimensions, c(
-      length(expected_full_mapped_genes),
-      length(expected_samples)
-    )),
-    identical(genes, expected_full_mapped_genes),
-    identical(samples, expected_samples),
-    identical(scale, "log2_cpm"),
-    cell_group %in% expected_groups,
-    any(non_signature_genes %in% genes)
-  )
-  cell_group
-})
-stopifnot(setequal(hdf5_groups, expected_groups))
-stopifnot(anyDuplicated(hdf5_groups) == 0L)
-
-purrr::walk(group_tsv, function(path) {
+cell_type_beds <- output_value("cell_type_beds")
+stopifnot(length(cell_type_beds) == length(expected_groups))
+purrr::walk(cell_type_beds, function(path) {
   table <- readr::read_tsv(
     path,
     col_types = readr::cols(.default = readr::col_character()),
@@ -156,19 +106,18 @@ purrr::walk(group_tsv, function(path) {
     progress = FALSE
   )
   stopifnot(
-    identical(table$gene_name, expected_full_mapped_genes),
-    identical(names(table)[-1L], expected_samples),
-    any(non_signature_genes %in% table$gene_name)
+    identical(table$gene_id, expected_full_mapped_genes),
+    identical(names(table)[-(1:4)], expected_samples)
   )
 })
 
 inventory <- readr::read_tsv(
-  output_value("output_inventory"),
+  output_value("cell_type_bed_inventory"),
   show_col_types = FALSE,
   progress = FALSE
 )
 stopifnot(
-  nrow(inventory) == 2L * length(expected_groups),
+  nrow(inventory) == length(expected_groups),
   all(inventory$n_genes == length(expected_full_mapped_genes)),
   all(inventory$n_samples == length(expected_samples)),
   all(inventory$scale == "log2_cpm"),
@@ -183,10 +132,8 @@ parameters <- manifest$parameters
 required_parameter_names <- c(
   "proportion_mode", "min_lm22_overlap", "dtangle_marker_fraction",
   "dtangle_marker_method", "dtangle_quantile_normalize",
-  "group_mean_threshold", "zero_floor", "tca_shard_size",
-  "tca_max_iters", "random_seed", "write_tsv",
-  "hdf5_gene_chunk_max", "hdf5_sample_chunk_max",
-  "hdf5_gzip_level", "scale"
+  "group_mean_threshold", "zero_floor", "tca_max_iters",
+  "random_seed", "scale"
 )
 numeric_parameter <- function(name) {
   as.numeric(parameters[[name]])
@@ -200,13 +147,8 @@ stopifnot(
   identical(parameters$dtangle_quantile_normalize, FALSE),
   numeric_parameter("group_mean_threshold") == 0.0001,
   numeric_parameter("zero_floor") == 0.000001,
-  numeric_parameter("tca_shard_size") == 24,
   numeric_parameter("tca_max_iters") == 10,
   numeric_parameter("random_seed") == 20260901,
-  identical(parameters$write_tsv, TRUE),
-  numeric_parameter("hdf5_gene_chunk_max") == 500,
-  numeric_parameter("hdf5_sample_chunk_max") == 256,
-  numeric_parameter("hdf5_gzip_level") == 6,
   identical(parameters$scale, "log2_cpm"),
   identical(manifest$tca_version, "1.2.1")
 )
@@ -224,17 +166,18 @@ purrr::walk(manifest_outputs, function(entry) {
 })
 
 required_file_outputs <- c(
-  "prepared_cpm", "prepared_log2_cpm", "mapping_report",
+  "prepared_tca_cpm", "prepared_tca_log2_cpm",
+  "prepared_dtangle_cpm", "prepared_dtangle_log2_cpm",
+  "prepared_coordinates", "mapping_report",
   "prepare_excluded_genes", "prepare_log", "cell_group_filter_report",
   "proportions_log", "tca_model", "tca_model_log", "tca_excluded_genes",
-  "fit_tca_log", "qc_summary", "qc_plots", "assembly_log",
-  "effective_parameters_file", "manifest_log"
+  "fit_tca_log", "qc_summary", "qc_plots", "export_log",
+  "export_detail_log", "output_manifest", "manifest_log",
+  "effective_parameters_file"
 )
 purrr::walk(required_file_outputs, function(name) {
   stopifnot(file.exists(output_value(name)))
 })
-purrr::walk(output_value("tensor_shards"), ~ stopifnot(file.exists(.x)))
-purrr::walk(output_value("tensor_shard_logs"), ~ stopifnot(file.exists(.x)))
 
 message(sprintf(
   paste0(

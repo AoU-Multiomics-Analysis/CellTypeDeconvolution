@@ -5,7 +5,6 @@ task FitTca {
     File prepared_log2_cpm
     File tca_weights
     File? covariates
-    Int shard_size = 500
     Int max_iters = 10
     Int random_seed = 20260901
     String docker_image
@@ -30,13 +29,12 @@ task FitTca {
       --weights '~{tca_weights}' \
       ~{covariates_argument} \
       --num-cores '~{cpu}' \
-      --shard-size '~{shard_size}' \
       --max-iters '~{max_iters}' \
       --random-seed '~{random_seed}' \
       --output-dir outputs 2>&1 | tee -a "$log"
     printf 'stage=%s dimensions=%s outputs=%s completion_time=%s\n' \
-      "$stage" "$(wc -l < outputs/gene_shard_manifest.tsv)" \
-      "model,model_log,tca_expression,excluded_genes,shard_manifest,shards" \
+      "$stage" "$(wc -l < outputs/tca_expression.tsv.gz)" \
+      "model,model_log,tca_expression,excluded_genes" \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
   >>>
 
@@ -45,8 +43,6 @@ task FitTca {
     File model_log = "outputs/tca_model.log"
     File tca_expression = "outputs/tca_expression.tsv.gz"
     File excluded_genes = "outputs/tca_excluded_genes.tsv"
-    File shard_manifest = "outputs/gene_shard_manifest.tsv"
-    Array[File] shards = glob("outputs/shard_*.txt")
     File log = "fit_tca.log"
   }
 
@@ -60,46 +56,53 @@ task FitTca {
   }
 }
 
-task ExtractTcaShard {
+task ExportTcaBeds {
   input {
     File tca_expression
+    File coordinates
     File model
-    File shard
+    File tca_weights
+    File? covariates
     String docker_image
     Int cpu = 8
-    String memory = "64 GB"
-    Int disk_gb = 200
-    Int preemptible_attempts = 2
-    Int max_retries = 2
+    String memory = "128 GB"
+    Int disk_gb = 500
+    Int preemptible_attempts = 0
+    Int max_retries = 1
   }
+
+  String covariates_argument = if defined(covariates) then "--covariates " + select_first([covariates]) else ""
 
   command <<<
     set -euo pipefail
-    stage="extract_tca_shard"
+    stage="export_tca_beds"
     log="$stage.log"
     status=0
-    shard_name="$(basename '~{shard}')"
-    shard_id="${shard_name#shard_}"
-    shard_id="${shard_id%.txt}"
-    shard_id="$((10#$shard_id))"
     printf 'stage=%s start_time=%s\n' "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
     trap 'status=$?; printf "stage=%s error_status=%s time=%s\\n" "$stage" "$status" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"; exit "$status"' ERR
-    Rscript /opt/celltype/scripts/extract_tca_shard.R \
+    Rscript /opt/celltype/scripts/export_tca_beds.R \
       --expression-log '~{tca_expression}' \
+      --coordinates '~{coordinates}' \
       --model '~{model}' \
-      --genes '~{shard}' \
-      --shard-id "$shard_id" \
+      --weights '~{tca_weights}' \
+      ~{covariates_argument} \
       --num-cores '~{cpu}' \
-      --output outputs/tca_shard.h5 \
-      --log-file outputs/extract_tca_shard.log 2>&1 | tee -a "$log"
+      --output-dir outputs \
+      --log-file outputs/export_tca_beds.log 2>&1 | tee -a "$log"
     printf 'stage=%s dimensions=%s outputs=%s completion_time=%s\n' \
-      "$stage" "$(wc -l < '~{shard}')" "shard_hdf5" \
+      "$stage" "$(wc -l < outputs/cell_type_bed_inventory.tsv)" \
+      "cell_type_beds,inventory,reconstruction,qc_summary,qc_plots" \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
   >>>
 
   output {
-    File shard_hdf5 = "outputs/tca_shard.h5"
-    File log = "extract_tca_shard.log"
+    Array[File] cell_type_beds = glob("outputs/*.bed.gz")
+    File cell_type_bed_inventory = "outputs/cell_type_bed_inventory.tsv"
+    File reconstruction_by_sample = "outputs/reconstruction_by_sample.tsv"
+    File qc_summary = "outputs/qc_summary.tsv"
+    File qc_plots = "outputs/qc_plots.pdf"
+    File export_detail_log = "outputs/export_tca_beds.log"
+    File log = "export_tca_beds.log"
   }
 
   runtime {

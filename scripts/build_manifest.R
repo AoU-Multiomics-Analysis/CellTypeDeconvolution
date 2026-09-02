@@ -12,7 +12,7 @@ run_build_manifest <- function() {
     optparse::make_option(
       "--outputs",
       type = "character",
-      help = "TSV output inventory from assembly."
+      help = "TSV output inventory from direct BED export."
     ),
     optparse::make_option(
       "--pipeline-version",
@@ -94,13 +94,7 @@ run_build_manifest <- function() {
   )
   parameters <- if (is.null(options$parameters_json) ||
       !nzchar(options$parameters_json)) {
-    list(
-      tensor_shard_size = pipeline_defaults()$tensor_shard_size,
-      hdf5_gene_chunk_max = 500L,
-      hdf5_sample_chunk_max = 256L,
-      hdf5_gzip_level = 6L,
-      scale = "log2_cpm"
-    )
+    list(scale = "log2_cpm")
   } else {
     jsonlite::read_json(options$parameters_json, simplifyVector = FALSE)
   }

@@ -25,13 +25,16 @@ task PrepareExpression {
       --output-dir outputs 2>&1 | tee -a "$log"
     printf 'stage=%s dimensions=%s outputs=%s completion_time=%s\n' \
       "$stage" "$(wc -l < outputs/gene_mapping_report.tsv)" \
-      "prepared_cpm,prepared_log2_cpm,mapping_report,excluded_genes" \
+      "prepared_tca_cpm,prepared_tca_log2_cpm,prepared_dtangle_cpm,prepared_dtangle_log2_cpm,prepared_coordinates,mapping_report,excluded_genes" \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
   >>>
 
   output {
-    File prepared_cpm = "outputs/prepared_cpm.tsv.gz"
-    File prepared_log2_cpm = "outputs/prepared_log2_cpm.tsv.gz"
+    File prepared_tca_cpm = "outputs/prepared_tca_cpm.tsv.gz"
+    File prepared_tca_log2_cpm = "outputs/prepared_tca_log2_cpm.tsv.gz"
+    File prepared_dtangle_cpm = "outputs/prepared_dtangle_cpm.tsv.gz"
+    File prepared_dtangle_log2_cpm = "outputs/prepared_dtangle_log2_cpm.tsv.gz"
+    File prepared_coordinates = "outputs/prepared_coordinates.tsv"
     File mapping_report = "outputs/gene_mapping_report.tsv"
     File excluded_genes = "outputs/excluded_genes.tsv"
     File log = "prepare_expression.log"

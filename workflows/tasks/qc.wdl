@@ -1,79 +1,11 @@
 version 1.1
 
-task AssembleTca {
-  input {
-    Array[File] shard_hdf5
-    File shard_manifest
-    File tca_expression
-    File model
-    File tca_weights
-    File? covariates
-    Boolean write_tsv = false
-    String pipeline_version
-    String docker_image
-    Int cpu = 8
-    String memory = "128 GB"
-    Int disk_gb = 500
-    Int preemptible_attempts = 0
-    Int max_retries = 1
-  }
-
-  String covariates_argument = if defined(covariates) then "--covariates " + select_first([covariates]) else ""
-  String write_tsv_argument = if write_tsv then "--write-tsv" else ""
-
-  command <<<
-    set -euo pipefail
-    stage="assemble_tca"
-    log="$stage.log"
-    status=0
-    printf 'stage=%s start_time=%s\n' "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
-    trap 'status=$?; printf "stage=%s error_status=%s time=%s\\n" "$stage" "$status" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"; exit "$status"' ERR
-    printf '%s\n' ~{sep(' ', shard_hdf5)} > shards.txt
-    Rscript /opt/celltype/scripts/assemble_tca_outputs.R \
-      --shard-list shards.txt \
-      --manifest '~{shard_manifest}' \
-      --expression-log '~{tca_expression}' \
-      --model '~{model}' \
-      --weights '~{tca_weights}' \
-      ~{covariates_argument} \
-      --pipeline-version '~{pipeline_version}' \
-      ~{write_tsv_argument} \
-      --output-dir outputs \
-      --log-file outputs/assemble_tca_outputs.log 2>&1 | tee -a "$log"
-    printf 'stage=%s dimensions=%s outputs=%s completion_time=%s\n' \
-      "$stage" "$(wc -l < outputs/assembled_outputs.tsv)" \
-      "group_hdf5,group_tsv,reconstruction_by_sample,assembly_qc,output_inventory,qc_plots" \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
-  >>>
-
-  output {
-    Array[File] group_hdf5 = glob("outputs/*.h5")
-    Array[File] group_tsv = glob("outputs/*.tsv.gz")
-    File reconstruction_by_sample = "outputs/reconstruction_by_sample.tsv"
-    File assembly_qc = "outputs/qc_summary.tsv"
-    File output_inventory = "outputs/assembled_outputs.tsv"
-    File qc_plots = "outputs/qc_plots.pdf"
-    File log = "assemble_tca.log"
-  }
-
-  runtime {
-    docker: docker_image
-    cpu: cpu
-    memory: memory
-    disks: "local-disk ~{disk_gb} HDD"
-    preemptible: preemptible_attempts
-    maxRetries: max_retries
-  }
-}
-
 task BuildManifest {
   input {
-    File output_inventory
-    File reconstruction_by_sample
-    File assembly_qc_summary
-    File assembly_qc_plots
-    Array[File] group_hdf5
-    Array[File] group_tsv
+    File cell_type_bed_inventory
+    Array[File] cell_type_beds
+    File export_qc_summary
+    File export_qc_plots
     File model
     File model_log
     File mapping_report
@@ -103,9 +35,9 @@ task BuildManifest {
     status=0
     printf 'stage=%s start_time=%s\n' "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
     trap 'status=$?; printf "stage=%s error_status=%s time=%s\\n" "$stage" "$status" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"; exit "$status"' ERR
-    localized_group_files="$PWD/localized_group_files"
+    localized_bed_files="$PWD/localized_bed_files"
     rewritten_inventory=outputs/assembled_outputs.localized.tsv
-    mkdir -p "$localized_group_files"
+    mkdir -p "$localized_bed_files" outputs
     stage_localized_file() {
       source_path="$1"
       source_name="$(basename -- "$source_path")"
@@ -116,7 +48,7 @@ task BuildManifest {
       fi
       source_dir="$(dirname -- "$source_path")"
       source_absolute="$(cd -P -- "$source_dir" && pwd -P)/$source_name"
-      destination="$localized_group_files/$source_name"
+      destination="$localized_bed_files/$source_name"
       if [[ ! -e "$source_absolute" ]]; then
         printf 'stage=%s error_status=1 time=%s message=missing_source_output\n' \
           "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
@@ -134,15 +66,14 @@ task BuildManifest {
         exit 1
       fi
     }
-    cat > group_output_sources.txt <<'GROUP_OUTPUT_SOURCES'
-~{sep('\n', group_hdf5)}
-~{sep('\n', group_tsv)}
-GROUP_OUTPUT_SOURCES
+    cat > bed_output_sources.txt <<'BED_OUTPUT_SOURCES'
+~{sep('\n', cell_type_beds)}
+BED_OUTPUT_SOURCES
     while IFS= read -r source_path; do
       [[ -z "$source_path" ]] && continue
       stage_localized_file "$source_path"
-    done < group_output_sources.txt
-    awk -F '\t' -v OFS='\t' -v localized_dir="$localized_group_files" '
+    done < bed_output_sources.txt
+    awk -F '\t' -v OFS='\t' -v localized_dir="$localized_bed_files" '
       NR == 1 {
         path_column = 0
         for (column = 1; column <= NF; column++) {
@@ -152,7 +83,7 @@ GROUP_OUTPUT_SOURCES
           }
         }
         if (path_column == 0) {
-          print "Missing path column in assembled output inventory" > "/dev/stderr"
+          print "Missing path column in cell-type BED inventory" > "/dev/stderr"
           exit 1
         }
         print
@@ -162,13 +93,13 @@ GROUP_OUTPUT_SOURCES
         output_basename = $path_column
         sub(/^.*\//, "", output_basename)
         if (output_basename == "") {
-          print "Empty path in assembled output inventory" > "/dev/stderr"
+          print "Empty path in cell-type BED inventory" > "/dev/stderr"
           exit 1
         }
         $path_column = localized_dir "/" output_basename
         print
       }
-    ' '~{output_inventory}' > "$rewritten_inventory"
+    ' '~{cell_type_bed_inventory}' > "$rewritten_inventory"
     awk -F '\t' '
       NR == 1 {
         path_column = 0
@@ -179,7 +110,7 @@ GROUP_OUTPUT_SOURCES
           }
         }
         if (path_column == 0) {
-          print "Missing path column in localized output inventory" > "/dev/stderr"
+          print "Missing path column in localized BED inventory" > "/dev/stderr"
           exit 1
         }
         next
@@ -194,7 +125,8 @@ GROUP_OUTPUT_SOURCES
       fi
     done < rewritten_paths.txt
     printf '%s\n' \
-      '~{reconstruction_by_sample}' \
+      '~{export_qc_summary}' \
+      '~{export_qc_plots}' \
       '~{model}' \
       '~{model_log}' \
       '~{mapping_report}' \
@@ -219,8 +151,8 @@ GROUP_OUTPUT_SOURCES
 
   output {
     File output_manifest = "outputs/output_manifest.json"
-    File qc_summary = assembly_qc_summary
-    File qc_plots = assembly_qc_plots
+    File qc_summary = export_qc_summary
+    File qc_plots = export_qc_plots
     File provenance = "outputs/assembled_outputs.localized.tsv"
     File log = "build_manifest.log"
   }

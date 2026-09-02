@@ -26,44 +26,35 @@ testthat::test_that("the expression WDL requires CPM and GTF", {
   text <- wdl_text("workflows/tasks/expression.wdl")
   testthat::expect_match(text, "File expression", fixed = TRUE)
   testthat::expect_match(text, "File gtf", fixed = TRUE)
-  testthat::expect_match(text, "prepared_cpm", fixed = TRUE)
-  testthat::expect_match(text, "prepared_log2_cpm", fixed = TRUE)
+  testthat::expect_match(text, "prepared_tca_cpm", fixed = TRUE)
+  testthat::expect_match(text, "prepared_tca_log2_cpm", fixed = TRUE)
   testthat::expect_false(grepl("expression_type|gene_length", text))
 })
 
-testthat::test_that("top-level workflow requires CPM and GTF and exposes both proportion modes", {
+testthat::test_that("top workflow uses one direct BED export", {
   text <- wdl_text("workflows/cell_type_deconvolution.wdl")
-  testthat::expect_match(text, "File expression", fixed = TRUE)
-  testthat::expect_match(text, "File gtf", fixed = TRUE)
-  testthat::expect_match(text, "File[?] lm22")
-  testthat::expect_match(text, "File[?] precomputed_proportions")
-  testthat::expect_match(text, "scatter .*shard")
-  testthat::expect_identical(
-    stringr::str_count(
-      text,
-      stringr::fixed(
-        "prepared_log2_cpm = PrepareExpression.prepared_log2_cpm,"
-      )
-    ),
-    2L
+  testthat::expect_match(text, "call tca_tasks.ExportTcaBeds", fixed = TRUE)
+  testthat::expect_match(text, "Array[File] cell_type_beds", fixed = TRUE)
+  testthat::expect_match(
+    text,
+    "prepared_log2_cpm = PrepareExpression.prepared_tca_log2_cpm",
+    fixed = TRUE
   )
+  testthat::expect_match(
+    text,
+    "prepared_log2_cpm = PrepareExpression.prepared_dtangle_log2_cpm",
+    fixed = TRUE
+  )
+  testthat::expect_false(grepl(
+    "scatter|shard|hdf5|group_tsv|write_tsv",
+    text,
+    ignore.case = TRUE
+  ))
   testthat::expect_false(grepl(
     "prepared_log2_cpm = RunDtangle.shared_bulk",
     text,
     fixed = TRUE
   ))
-  testthat::expect_match(text, "call qc_tasks.BuildManifest", fixed = TRUE)
-  testthat::expect_match(
-    text,
-    "output_inventory = AssembleTca.output_inventory",
-    fixed = TRUE
-  )
-  testthat::expect_match(
-    text,
-    "assembly_qc_plots = AssembleTca.qc_plots",
-    fixed = TRUE
-  )
-  testthat::expect_false(grepl("expression_type|gene_length", text))
 })
 
 testthat::test_that("top-level manifest records effective parameters with a pinned TCA version", {
@@ -92,11 +83,13 @@ testthat::test_that("top-level manifest records effective parameters with a pinn
   purrr::walk(c(
     "proportion_mode", "min_lm22_overlap", "dtangle_marker_fraction",
     "dtangle_marker_method", "dtangle_quantile_normalize",
-    "group_mean_threshold", "zero_floor", "tca_shard_size",
-    "tca_max_iters", "random_seed", "write_tsv",
-    "hdf5_gene_chunk_max", "hdf5_sample_chunk_max",
-    "hdf5_gzip_level", "scale"
+    "group_mean_threshold", "zero_floor", "tca_max_iters",
+    "random_seed", "scale"
   ), ~ testthat::expect_match(text, .x, fixed = TRUE))
+  purrr::walk(c(
+    "tca_shard_size", "write_tsv", "hdf5_gene_chunk_max",
+    "hdf5_sample_chunk_max", "hdf5_gzip_level"
+  ), ~ testthat::expect_false(grepl(.x, text, fixed = TRUE)))
   testthat::expect_match(
     text,
     "parameters_json = effective_parameters_json",
@@ -174,7 +167,9 @@ testthat::test_that("all modular WDL tasks declare CLI-aligned interfaces", {
   expect_task_contract(
     "workflows/tasks/expression.wdl", "PrepareExpression",
     c("File expression", "File gtf", "String docker_image"),
-    c("File prepared_cpm", "File prepared_log2_cpm", "File mapping_report",
+    c("File prepared_tca_cpm", "File prepared_tca_log2_cpm",
+      "File prepared_dtangle_cpm", "File prepared_dtangle_log2_cpm",
+      "File prepared_coordinates", "File mapping_report",
       "File excluded_genes", "File log"),
     c("Int cpu = 4", "String memory = \"64 GB\"", "Int disk_gb = 400",
       "Int preemptible_attempts = 2", "Int max_retries = 2")
@@ -198,27 +193,26 @@ testthat::test_that("all modular WDL tasks declare CLI-aligned interfaces", {
   )
   tca_text <- wdl_text("workflows/tasks/tca.wdl")
   testthat::expect_match(tca_text, "task FitTca", fixed = TRUE)
-  testthat::expect_match(tca_text, "task ExtractTcaShard", fixed = TRUE)
   purrr::walk(c(
     "File prepared_log2_cpm", "File tca_weights", "File? covariates",
-    "Int shard_size", "Int max_iters", "Int random_seed", "File model",
+    "Int max_iters", "Int random_seed", "File model",
     "File model_log", "File tca_expression", "File excluded_genes",
-    "File shard_manifest", "Array[File] shards", "File shard", "File shard_hdf5",
     "Int cpu = 16", "String memory = \"192 GB\"", "Int disk_gb = 750",
-    "Int preemptible_attempts = 0", "Int max_retries = 1",
-    "Int cpu = 8", "String memory = \"64 GB\"", "Int disk_gb = 200",
-    "Int preemptible_attempts = 2", "Int max_retries = 2"
+    "Int preemptible_attempts = 0", "Int max_retries = 1"
+  ), ~ testthat::expect_match(tca_text, .x, fixed = TRUE))
+  testthat::expect_match(tca_text, "task ExportTcaBeds", fixed = TRUE)
+  purrr::walk(c(
+    "File tca_expression", "File coordinates", "File model",
+    "File tca_weights", "Array[File] cell_type_beds",
+    "File cell_type_bed_inventory", "File reconstruction_by_sample",
+    "File qc_summary", "File qc_plots", "File export_detail_log"
   ), ~ testthat::expect_match(tca_text, .x, fixed = TRUE))
   qc_text <- wdl_text("workflows/tasks/qc.wdl")
   purrr::walk(c(
-    "task AssembleTca", "task BuildManifest", "Array[File] shard_hdf5",
-    "File shard_manifest", "File tca_expression", "File model", "File tca_weights",
-    "File? covariates", "Boolean write_tsv", "String pipeline_version",
-    "Array[File] group_hdf5", "Array[File] group_tsv",
-    "File reconstruction_by_sample", "File assembly_qc", "File output_manifest",
+    "task BuildManifest", "Array[File] cell_type_beds",
+    "File cell_type_bed_inventory", "File export_qc_summary",
+    "File export_qc_plots", "File output_manifest",
     "File qc_summary", "File qc_plots", "File provenance",
-    "Int cpu = 8", "String memory = \"128 GB\"", "Int disk_gb = 500",
-    "Int preemptible_attempts = 0", "Int max_retries = 1",
     "Int cpu = 4", "String memory = \"32 GB\"", "Int disk_gb = 100",
     "Int preemptible_attempts = 1", "Int max_retries = 2"
   ), ~ testthat::expect_match(qc_text, .x, fixed = TRUE))

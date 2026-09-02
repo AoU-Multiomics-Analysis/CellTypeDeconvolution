@@ -14,13 +14,8 @@ struct EffectiveParameters {
   Boolean dtangle_quantile_normalize
   Float group_mean_threshold
   Float zero_floor
-  Int tca_shard_size
   Int tca_max_iters
   Int random_seed
-  Boolean write_tsv
-  Int hdf5_gene_chunk_max
-  Int hdf5_sample_chunk_max
-  Int hdf5_gzip_level
   String scale
 }
 
@@ -38,10 +33,8 @@ workflow cell_type_deconvolution {
     Boolean dtangle_quantile_normalize = false
     Float group_mean_threshold = 0.0001
     Float zero_floor = 0.000001
-    Int tca_shard_size = 500
     Int tca_max_iters = 10
     Int random_seed = 20260901
-    Boolean write_tsv = false
 
     Int prepare_cpu = 4
     String prepare_memory = "64 GB"
@@ -63,16 +56,11 @@ workflow cell_type_deconvolution {
     Int fit_disk_gb = 750
     Int fit_preemptible_attempts = 0
     Int fit_max_retries = 1
-    Int extract_cpu = 8
-    String extract_memory = "64 GB"
-    Int extract_disk_gb = 200
-    Int extract_preemptible_attempts = 2
-    Int extract_max_retries = 2
-    Int assemble_cpu = 8
-    String assemble_memory = "128 GB"
-    Int assemble_disk_gb = 500
-    Int assemble_preemptible_attempts = 0
-    Int assemble_max_retries = 1
+    Int export_cpu = 8
+    String export_memory = "128 GB"
+    Int export_disk_gb = 500
+    Int export_preemptible_attempts = 0
+    Int export_max_retries = 1
     Int manifest_cpu = 4
     String manifest_memory = "32 GB"
     Int manifest_disk_gb = 100
@@ -92,13 +80,8 @@ workflow cell_type_deconvolution {
     dtangle_quantile_normalize: dtangle_quantile_normalize,
     group_mean_threshold: group_mean_threshold,
     zero_floor: zero_floor,
-    tca_shard_size: tca_shard_size,
     tca_max_iters: tca_max_iters,
     random_seed: random_seed,
-    write_tsv: write_tsv,
-    hdf5_gene_chunk_max: 500,
-    hdf5_sample_chunk_max: 256,
-    hdf5_gzip_level: 6,
     scale: "log2_cpm"
   }
   File effective_parameters_json = write_json(effective_parameters)
@@ -118,7 +101,7 @@ workflow cell_type_deconvolution {
   if (estimate_proportions) {
     call dtangle_tasks.RunDtangle {
       input:
-        prepared_log2_cpm = PrepareExpression.prepared_log2_cpm,
+        prepared_log2_cpm = PrepareExpression.prepared_dtangle_log2_cpm,
         lm22 = select_first([lm22]),
         min_overlap = min_lm22_overlap,
         marker_fraction = dtangle_marker_fraction,
@@ -153,10 +136,9 @@ workflow cell_type_deconvolution {
 
   call tca_tasks.FitTca {
     input:
-      prepared_log2_cpm = PrepareExpression.prepared_log2_cpm,
+      prepared_log2_cpm = PrepareExpression.prepared_tca_log2_cpm,
       tca_weights = ProcessProportions.tca_weights,
       covariates = covariates,
-      shard_size = tca_shard_size,
       max_iters = tca_max_iters,
       random_seed = random_seed,
       docker_image = docker_image,
@@ -167,47 +149,27 @@ workflow cell_type_deconvolution {
       max_retries = fit_max_retries
   }
 
-  scatter (shard in FitTca.shards) {
-    call tca_tasks.ExtractTcaShard {
-      input:
-        tca_expression = FitTca.tca_expression,
-        model = FitTca.model,
-        shard = shard,
-        docker_image = docker_image,
-        cpu = extract_cpu,
-        memory = extract_memory,
-        disk_gb = extract_disk_gb,
-        preemptible_attempts = extract_preemptible_attempts,
-        max_retries = extract_max_retries
-    }
-  }
-
-  call qc_tasks.AssembleTca {
+  call tca_tasks.ExportTcaBeds {
     input:
-      shard_hdf5 = ExtractTcaShard.shard_hdf5,
-      shard_manifest = FitTca.shard_manifest,
       tca_expression = FitTca.tca_expression,
+      coordinates = PrepareExpression.prepared_coordinates,
       model = FitTca.model,
       tca_weights = ProcessProportions.tca_weights,
       covariates = covariates,
-      write_tsv = write_tsv,
-      pipeline_version = pipeline_version,
       docker_image = docker_image,
-      cpu = assemble_cpu,
-      memory = assemble_memory,
-      disk_gb = assemble_disk_gb,
-      preemptible_attempts = assemble_preemptible_attempts,
-      max_retries = assemble_max_retries
+      cpu = export_cpu,
+      memory = export_memory,
+      disk_gb = export_disk_gb,
+      preemptible_attempts = export_preemptible_attempts,
+      max_retries = export_max_retries
   }
 
   call qc_tasks.BuildManifest {
     input:
-      output_inventory = AssembleTca.output_inventory,
-      reconstruction_by_sample = AssembleTca.reconstruction_by_sample,
-      assembly_qc_summary = AssembleTca.assembly_qc,
-      assembly_qc_plots = AssembleTca.qc_plots,
-      group_hdf5 = AssembleTca.group_hdf5,
-      group_tsv = AssembleTca.group_tsv,
+      cell_type_bed_inventory = ExportTcaBeds.cell_type_bed_inventory,
+      cell_type_beds = ExportTcaBeds.cell_type_beds,
+      export_qc_summary = ExportTcaBeds.qc_summary,
+      export_qc_plots = ExportTcaBeds.qc_plots,
       model = FitTca.model,
       model_log = FitTca.model_log,
       mapping_report = PrepareExpression.mapping_report,
@@ -229,8 +191,11 @@ workflow cell_type_deconvolution {
   }
 
   output {
-    File prepared_cpm = PrepareExpression.prepared_cpm
-    File prepared_log2_cpm = PrepareExpression.prepared_log2_cpm
+    File prepared_tca_cpm = PrepareExpression.prepared_tca_cpm
+    File prepared_tca_log2_cpm = PrepareExpression.prepared_tca_log2_cpm
+    File prepared_dtangle_cpm = PrepareExpression.prepared_dtangle_cpm
+    File prepared_dtangle_log2_cpm = PrepareExpression.prepared_dtangle_log2_cpm
+    File prepared_coordinates = PrepareExpression.prepared_coordinates
     File mapping_report = PrepareExpression.mapping_report
     File prepare_excluded_genes = PrepareExpression.excluded_genes
     File prepare_log = PrepareExpression.log
@@ -253,22 +218,18 @@ workflow cell_type_deconvolution {
     File tca_model_log = FitTca.model_log
     File tca_expression = FitTca.tca_expression
     File tca_excluded_genes = FitTca.excluded_genes
-    File gene_shard_manifest = FitTca.shard_manifest
-    Array[File] gene_shards = FitTca.shards
     File fit_tca_log = FitTca.log
 
-    Array[File] tensor_shards = ExtractTcaShard.shard_hdf5
-    Array[File] tensor_shard_logs = ExtractTcaShard.log
-    Array[File] group_hdf5 = AssembleTca.group_hdf5
-    Array[File] group_tsv = AssembleTca.group_tsv
-    File reconstruction_by_sample = AssembleTca.reconstruction_by_sample
-    File assembly_output_inventory = AssembleTca.output_inventory
-    File qc_summary = BuildManifest.qc_summary
-    File qc_plots = BuildManifest.qc_plots
-    File assembly_log = AssembleTca.log
-    File output_inventory = BuildManifest.provenance
+    Array[File] cell_type_beds = ExportTcaBeds.cell_type_beds
+    File cell_type_bed_inventory = ExportTcaBeds.cell_type_bed_inventory
+    File reconstruction_by_sample = ExportTcaBeds.reconstruction_by_sample
+    File qc_summary = ExportTcaBeds.qc_summary
+    File qc_plots = ExportTcaBeds.qc_plots
+    File export_log = ExportTcaBeds.log
+    File export_detail_log = ExportTcaBeds.export_detail_log
     File output_manifest = BuildManifest.output_manifest
-    File effective_parameters_file = effective_parameters_json
+    File output_inventory = BuildManifest.provenance
     File manifest_log = BuildManifest.log
+    File effective_parameters_file = effective_parameters_json
   }
 }

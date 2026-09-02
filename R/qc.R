@@ -38,7 +38,7 @@ validate_reconstruction_inputs <- function(tensor, weights, C2, deltas_hat) {
   invisible(TRUE)
 }
 
-reconstruct_tensor_shard <- function(
+reconstruct_tensor <- function(
     tensor,
     weights,
     C2 = NULL,
@@ -67,6 +67,21 @@ reconstruct_tensor_shard <- function(
     stop("Reconstructed values must be finite", call. = FALSE)
   }
   reconstructed
+}
+
+sample_qc_values <- function(observed, reconstructed, maximum = 5000L) {
+  observed_values <- as.vector(observed)
+  reconstructed_values <- as.vector(reconstructed)
+  keep_count <- min(length(observed_values), maximum)
+  keep <- unique(as.integer(round(seq(
+    1,
+    length(observed_values),
+    length.out = keep_count
+  ))))
+  tibble::tibble(
+    observed = observed_values[keep],
+    reconstructed = reconstructed_values[keep]
+  )
 }
 
 initialize_reconstruction_stats <- function(sample_ids) {

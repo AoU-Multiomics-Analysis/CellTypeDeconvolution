@@ -136,7 +136,7 @@ gtf_lines <- purrr::pmap_chr(
 writeLines(gtf_lines, file.path(output_directory, "synthetic.gtf"))
 
 writeLines(sample_ids, file.path(output_directory, "expected_samples.txt"))
-writeLines(sort(all_gene_names), file.path(output_directory, "expected_genes.txt"))
+writeLines(all_gene_ids, file.path(output_directory, "expected_genes.txt"))
 writeLines(cell_groups, file.path(output_directory, "expected_groups.txt"))
 
 common_inputs <- list(
@@ -150,10 +150,8 @@ common_inputs <- list(
   "cell_type_deconvolution.dtangle_quantile_normalize" = FALSE,
   "cell_type_deconvolution.group_mean_threshold" = 0.0001,
   "cell_type_deconvolution.zero_floor" = 0.000001,
-  "cell_type_deconvolution.tca_shard_size" = 24L,
   "cell_type_deconvolution.tca_max_iters" = 10L,
   "cell_type_deconvolution.random_seed" = seed,
-  "cell_type_deconvolution.write_tsv" = TRUE,
   "cell_type_deconvolution.prepare_cpu" = 4L,
   "cell_type_deconvolution.prepare_memory" = "64 GB",
   "cell_type_deconvolution.prepare_disk_gb" = 400L,
@@ -174,16 +172,11 @@ common_inputs <- list(
   "cell_type_deconvolution.fit_disk_gb" = 750L,
   "cell_type_deconvolution.fit_preemptible_attempts" = 0L,
   "cell_type_deconvolution.fit_max_retries" = 1L,
-  "cell_type_deconvolution.extract_cpu" = 8L,
-  "cell_type_deconvolution.extract_memory" = "64 GB",
-  "cell_type_deconvolution.extract_disk_gb" = 200L,
-  "cell_type_deconvolution.extract_preemptible_attempts" = 2L,
-  "cell_type_deconvolution.extract_max_retries" = 2L,
-  "cell_type_deconvolution.assemble_cpu" = 8L,
-  "cell_type_deconvolution.assemble_memory" = "128 GB",
-  "cell_type_deconvolution.assemble_disk_gb" = 500L,
-  "cell_type_deconvolution.assemble_preemptible_attempts" = 0L,
-  "cell_type_deconvolution.assemble_max_retries" = 1L,
+  "cell_type_deconvolution.export_cpu" = 8L,
+  "cell_type_deconvolution.export_memory" = "128 GB",
+  "cell_type_deconvolution.export_disk_gb" = 500L,
+  "cell_type_deconvolution.export_preemptible_attempts" = 0L,
+  "cell_type_deconvolution.export_max_retries" = 1L,
   "cell_type_deconvolution.manifest_cpu" = 4L,
   "cell_type_deconvolution.manifest_memory" = "32 GB",
   "cell_type_deconvolution.manifest_disk_gb" = 100L,

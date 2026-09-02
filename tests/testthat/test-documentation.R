@@ -27,6 +27,12 @@ testthat::test_that("both examples use BED and GTF workflow inputs", {
     testthat::expect_false(any(paste0(
       "cell_type_deconvolution.", removed_parameters
     ) %in% names(inputs)))
+    image <- inputs[["cell_type_deconvolution.docker_image"]]
+    testthat::expect_match(
+      image,
+      "@sha256:REPLACE_WITH_64_LOWERCASE_HEX_DIGEST$"
+    )
+    testthat::expect_false(grepl(":latest", image, fixed = TRUE))
   })
 })
 
@@ -41,6 +47,8 @@ testthat::test_that("Terra guidance gives the input scale and LM22 contract", {
   testthat::expect_match(text, "log2\\(CPM\\)")
   testthat::expect_match(text, "strictly positive")
   testthat::expect_false(grepl("expression_type|log2_tpm", text))
+  testthat::expect_match(text, "64 lowercase hexadecimal")
+  testthat::expect_match(text, "celltype-deconvolution:test.*only")
 })
 
 testthat::test_that("active dependencies and guides use direct BED outputs", {
@@ -64,4 +72,17 @@ testthat::test_that("active dependencies and guides use direct BED outputs", {
     "group_hdf5|tensor_shards|gene_shard_manifest|write_tsv",
     guides
   ))
+})
+
+testthat::test_that("data dictionary uses the implemented overlap interval", {
+  text <- paste(
+    readLines(testthat::test_path("../..", "docs", "data-dictionary.md")),
+    collapse = "\n"
+  )
+
+  testthat::expect_match(
+    text,
+    "min_lm22_overlap.*greater than 0 and no greater than 1"
+  )
+  testthat::expect_false(grepl("Finite value from 0 through 1", text, fixed = TRUE))
 })

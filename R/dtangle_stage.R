@@ -112,7 +112,15 @@ prepare_dtangle_inputs <- function(
     stop("quantile_normalize must be one non-missing logical value", call. = FALSE)
   }
 
-  transformed_lm22 <- transform_lm22(lm22_linear)
+  lm22_linear <- standardize_lm22(lm22_linear)
+  lm22_qc <- list(
+    gene_count = nrow(lm22_linear),
+    cell_type_count = ncol(lm22_linear),
+    value_min = min(lm22_linear),
+    value_max = max(lm22_linear),
+    validation_status = "passed"
+  )
+  transformed_lm22 <- log2(lm22_linear)
   bulk_log <- standardize_bulk_log(bulk_log)
   overlap_report <- tibble::tibble(
     gene_symbol = rownames(transformed_lm22),
@@ -157,7 +165,8 @@ prepare_dtangle_inputs <- function(
     overlap_count = overlap_count,
     overlap_fraction = overlap_fraction,
     min_overlap = min_overlap,
-    quantile_normalize = quantile_normalize
+    quantile_normalize = quantile_normalize,
+    lm22_qc = lm22_qc
   )
 }
 
@@ -232,7 +241,8 @@ estimate_dtangle <- function(
     reference_dimensions = list(
       cell_types = nrow(inputs$references),
       genes = ncol(inputs$references)
-    )
+    ),
+    lm22_qc = inputs$lm22_qc
   )
 
   list(proportions = proportions, markers = markers, metadata = metadata)

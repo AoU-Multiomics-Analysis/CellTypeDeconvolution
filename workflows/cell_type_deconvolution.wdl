@@ -69,8 +69,14 @@ workflow cell_type_deconvolution {
   }
 
   String tca_version = "1.2.1"
-  Boolean estimate_proportions = !defined(precomputed_proportions)
-  String proportion_mode = if estimate_proportions then "dtangle" else "precomputed"
+  call proportion_tasks.ValidateProportionMode {
+    input:
+      lm22 = lm22,
+      precomputed_proportions = precomputed_proportions,
+      docker_image = docker_image
+  }
+
+  String proportion_mode = ValidateProportionMode.selected_mode
   String dtangle_marker_method = "ratio"
   EffectiveParameters effective_parameters = EffectiveParameters {
     proportion_mode: proportion_mode,
@@ -98,7 +104,7 @@ workflow cell_type_deconvolution {
       max_retries = prepare_max_retries
   }
 
-  if (estimate_proportions) {
+  if (ValidateProportionMode.estimate_proportions) {
     call dtangle_tasks.RunDtangle {
       input:
         prepared_log2_cpm = PrepareExpression.prepared_dtangle_log2_cpm,
@@ -116,10 +122,9 @@ workflow cell_type_deconvolution {
     }
   }
 
-  File proportions_for_processing = select_first([
-    precomputed_proportions,
-    RunDtangle.proportions
-  ])
+  File proportions_for_processing = if ValidateProportionMode.estimate_proportions
+    then select_first([RunDtangle.proportions])
+    else select_first([precomputed_proportions])
 
   call proportion_tasks.ProcessProportions {
     input:
@@ -178,6 +183,7 @@ workflow cell_type_deconvolution {
       combined_proportions = ProcessProportions.combined,
       tca_weights = ProcessProportions.tca_weights,
       filter_report = ProcessProportions.filter_report,
+      dtangle_metadata = RunDtangle.metadata,
       parameters_json = effective_parameters_json,
       pipeline_version = pipeline_version,
       tca_version = tca_version,
@@ -199,6 +205,7 @@ workflow cell_type_deconvolution {
     File mapping_report = PrepareExpression.mapping_report
     File prepare_excluded_genes = PrepareExpression.excluded_genes
     File prepare_log = PrepareExpression.log
+    File proportion_mode_validation_log = ValidateProportionMode.log
 
     File? estimated_proportions = RunDtangle.proportions
     File? dtangle_markers = RunDtangle.markers
@@ -223,7 +230,7 @@ workflow cell_type_deconvolution {
     Array[File] cell_type_beds = ExportTcaBeds.cell_type_beds
     File cell_type_bed_inventory = ExportTcaBeds.cell_type_bed_inventory
     File reconstruction_by_sample = ExportTcaBeds.reconstruction_by_sample
-    File qc_summary = ExportTcaBeds.qc_summary
+    File qc_summary = BuildManifest.qc_summary
     File qc_plots = ExportTcaBeds.qc_plots
     File export_log = ExportTcaBeds.log
     File export_detail_log = ExportTcaBeds.export_detail_log

@@ -15,7 +15,7 @@ task FitTca {
     Int max_retries = 1
   }
 
-  String covariates_argument = if defined(covariates) then "--covariates " + select_first([covariates]) else ""
+  String covariates_path = if defined(covariates) then select_first([covariates]) else ""
 
   command <<<
     set -euo pipefail
@@ -24,16 +24,25 @@ task FitTca {
     status=0
     printf 'stage=%s start_time=%s\n' "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
     trap 'status=$?; printf "stage=%s error_status=%s time=%s\\n" "$stage" "$status" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"; exit "$status"' ERR
+    covariates_path="~{covariates_path}"
+    covariates_arguments=()
+    if [[ -n "$covariates_path" ]]; then
+      covariates_arguments=(--covariates "$covariates_path")
+    fi
     Rscript /opt/celltype/scripts/fit_tca.R \
       --expression-log '~{prepared_log2_cpm}' \
       --weights '~{tca_weights}' \
-      ~{covariates_argument} \
+      "${covariates_arguments[@]}" \
       --num-cores '~{cpu}' \
       --max-iters '~{max_iters}' \
       --random-seed '~{random_seed}' \
       --output-dir outputs 2>&1 | tee -a "$log"
-    printf 'stage=%s dimensions=%s outputs=%s completion_time=%s\n' \
-      "$stage" "$(wc -l < outputs/tca_expression.tsv.gz)" \
+    read -r gene_count sample_count < <(
+      gzip -cd outputs/tca_expression.tsv.gz |
+        awk -F '\t' 'NR == 1 { samples = NF - 1 } END { print NR - 1, samples }'
+    )
+    printf 'stage=%s dimensions=genes:%s,samples:%s outputs=%s completion_time=%s\n' \
+      "$stage" "$gene_count" "$sample_count" \
       "model,model_log,tca_expression,excluded_genes" \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
   >>>
@@ -71,7 +80,7 @@ task ExportTcaBeds {
     Int max_retries = 1
   }
 
-  String covariates_argument = if defined(covariates) then "--covariates " + select_first([covariates]) else ""
+  String covariates_path = if defined(covariates) then select_first([covariates]) else ""
 
   command <<<
     set -euo pipefail
@@ -80,12 +89,17 @@ task ExportTcaBeds {
     status=0
     printf 'stage=%s start_time=%s\n' "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
     trap 'status=$?; printf "stage=%s error_status=%s time=%s\\n" "$stage" "$status" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"; exit "$status"' ERR
+    covariates_path="~{covariates_path}"
+    covariates_arguments=()
+    if [[ -n "$covariates_path" ]]; then
+      covariates_arguments=(--covariates "$covariates_path")
+    fi
     Rscript /opt/celltype/scripts/export_tca_beds.R \
       --expression-log '~{tca_expression}' \
       --coordinates '~{coordinates}' \
       --model '~{model}' \
       --weights '~{tca_weights}' \
-      ~{covariates_argument} \
+      "${covariates_arguments[@]}" \
       --num-cores '~{cpu}' \
       --output-dir outputs \
       --log-file outputs/export_tca_beds.log 2>&1 | tee -a "$log"

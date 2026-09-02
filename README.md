@@ -22,6 +22,8 @@ Use dtangle mode when you provide a user-supplied linear LM22 matrix. It must co
 
 Use precomputed mode when you provide `precomputed_proportions` and omit `lm22`. The table must have one sample identifier column and all 22 standard LM22 columns. Sample IDs must match the prepared expression matrix.
 
+Provide exactly one of `lm22` and `precomputed_proportions`. A validation task records the selected mode before the workflow selects the proportion file. The workflow stops if you provide both files or neither file.
+
 Both modes combine the 22 LM22 types into ten groups: B cells, CD4 T cells, CD8 T cells, Gamma-delta T cells, NK cells, Monocyte/myeloid, Neutrophils, Eosinophils, Dendritic cells, and Mast cells. T follicular helper and regulatory T cells are in CD4 T cells. Gamma-delta T cells stay separate. A group is retained only when its cohort mean is at least `0.0001`. Retained exact zeros use `zero_floor` before each sample row is normalized to one.
 
 ## TCA and BED outputs
@@ -30,15 +32,15 @@ TCA fits one full-matrix model across the cohort. It uses mapped, nonconstant ge
 
 The workflow performs one direct tensor extraction. It writes one BED.GZ file per retained major cell group. Each file uses the `log2_cpm` model scale. These values are inferred log-expression estimates. They are not counts, linear CPM, or absolute cell-type expression values.
 
-Each BED.GZ output preserves `#chr`, `start`, `end`, `gene_id`, modeled-gene order, and sample-column order. It excludes unmapped genes and genes that are constant before fitting. `cell_type_bed_inventory` maps each retained group to its BED.GZ path, dimensions, and scale.
+Each BED.GZ output preserves `#chr`, `start`, `end`, `gene_id`, modeled-gene order, and sample-column order. It excludes unmapped genes and genes that are constant before fitting. `cell_type_beds` is the authoritative array of files. `cell_type_bed_inventory` and `output_inventory` use stable BED basenames. The output manifest also uses these basenames. The manifest task uses localized paths only for checksum calculation.
 
 The export task defaults to 8 CPU, 128 GB memory, 500 GB disk, 0 preemptible attempts, and 1 retry. These defaults support an initial cohort of about 9,000 samples. See [the data dictionary](docs/data-dictionary.md) for every input and output.
 
 ## Run and validation
 
-Import `workflows/cell_type_deconvolution.wdl` into Terra. Start with [bed.inputs.json](examples/bed.inputs.json) for dtangle mode or [precomputed-proportions.inputs.json](examples/precomputed-proportions.inputs.json) for precomputed mode. Replace each example cloud path with a readable path. Use a published image tag for production.
+Import `workflows/cell_type_deconvolution.wdl` into Terra. Start with [bed.inputs.json](examples/bed.inputs.json) for dtangle mode or [precomputed-proportions.inputs.json](examples/precomputed-proportions.inputs.json) for precomputed mode. Replace each example cloud path with a readable path. Replace the image placeholder with an immutable reference. A production image reference must contain `@sha256:` and exactly 64 lowercase hexadecimal characters. The exact tag `celltype-deconvolution:test` is permitted only for local repository smoke CI.
 
-The workflow writes a manifest, an output inventory, quality-control files, and task logs. GitHub Actions builds the pinned image and runs R tests, R lint, WDL checks, logging checks, and dtangle and precomputed smoke workflows. The smoke workflows check the BED coordinate and sample-order contract. A local Docker build is not required for a smoke test.
+The workflow writes a manifest, an output inventory, quality-control files, and task logs. The final QC summary includes LM22 validation when dtangle mode is active, proportion row-sum errors, normalization adjustment, duplicate counts, constant-gene exclusions, reconstruction metrics, and TCA convergence. TCA 1.2.1 does not return a convergence field in the model. The workflow derives the convergence status and iteration count from the TCA model log. GitHub Actions builds the pinned image and runs R tests, R lint, WDL checks, logging checks, and dtangle and precomputed smoke workflows. The smoke workflows check the exact ordered 22 LM22 columns and the BED coordinate and sample-order contract. A local Docker build is not required for a smoke test.
 
 Migration note: the workflow does not produce HDF5 or tensor shards.
 

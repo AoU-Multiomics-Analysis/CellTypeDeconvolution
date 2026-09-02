@@ -78,7 +78,18 @@ expected_groups <- readLines(
 proportions <- read_matrix_table("proportions_lm22", "sample_id")
 combined <- read_matrix_table("proportions_combined", "sample_id")
 tca_weights <- read_matrix_table("tca_weights", "sample_id")
+expected_lm22_types <- c(
+  "B cells naive", "B cells memory", "Plasma cells", "T cells CD8",
+  "T cells CD4 naive", "T cells CD4 memory resting",
+  "T cells CD4 memory activated", "T cells follicular helper",
+  "T cells regulatory (Tregs)", "T cells gamma delta",
+  "NK cells resting", "NK cells activated", "Monocytes",
+  "Macrophages M0", "Macrophages M1", "Macrophages M2",
+  "Dendritic cells resting", "Dendritic cells activated",
+  "Mast cells resting", "Mast cells activated", "Eosinophils", "Neutrophils"
+)
 stopifnot(all(is.finite(proportions)), all(proportions >= 0))
+stopifnot(identical(colnames(proportions), expected_lm22_types))
 stopifnot(max(abs(rowSums(proportions) - 1)) < 1e-8)
 stopifnot(all(is.finite(combined)), all(combined >= 0))
 stopifnot(max(abs(rowSums(combined) - 1)) < 1e-8)
@@ -147,7 +158,7 @@ inventory <- readr::read_tsv(
   show_col_types = FALSE,
   progress = FALSE
 )
-inventory_paths <- normalizePath(inventory$path)
+inventory_basenames <- inventory$path
 stopifnot(
   nrow(inventory) == length(expected_groups),
   all(inventory$n_genes == length(expected_gene_ids)),
@@ -156,10 +167,16 @@ stopifnot(
   setequal(inventory$cell_group, expected_groups),
   all(nzchar(inventory$slug)),
   anyDuplicated(inventory$slug) == 0L,
-  all(grepl("[.]bed[.]gz$", inventory_paths)),
-  anyDuplicated(inventory_paths) == 0L,
-  setequal(cell_type_bed_paths, inventory_paths)
+  all(grepl("^[^/]+[.]bed[.]gz$", inventory_basenames)),
+  anyDuplicated(inventory_basenames) == 0L,
+  setequal(basename(cell_type_bed_paths), inventory_basenames)
 )
+public_inventory <- readr::read_tsv(
+  output_value("output_inventory"),
+  show_col_types = FALSE,
+  progress = FALSE
+)
+stopifnot(identical(public_inventory, inventory))
 
 manifest <- jsonlite::read_json(
   output_value("output_manifest"),
@@ -193,6 +210,8 @@ manifest_outputs <- manifest$outputs
 stopifnot(length(manifest_outputs) == nrow(inventory))
 purrr::walk(manifest_outputs, function(entry) {
   stopifnot(
+    identical(entry$path, entry$file_name),
+    grepl("^[^/]+[.]bed[.]gz$", entry$path),
     identical(entry$scale, "log2_cpm"),
     identical(unlist(entry$dimensions, use.names = FALSE), c(
       length(expected_gene_ids),
@@ -202,14 +221,44 @@ purrr::walk(manifest_outputs, function(entry) {
   )
 })
 
+qc_summary <- readr::read_tsv(
+  output_value("qc_summary"),
+  show_col_types = FALSE,
+  progress = FALSE
+)
+required_qc_metrics <- c(
+  "lm22_value_validation", "lm22_value_min", "lm22_value_max",
+  "input_proportion_max_row_sum_error",
+  "combined_proportion_max_row_sum_error",
+  "adjusted_weight_max_row_sum_error",
+  "normalization_adjustment_max_abs", "zero_values_adjusted",
+  "duplicate_gene_symbol_input_row_count", "duplicate_gene_symbol_count",
+  "tca_internal_iterations", "tca_max_internal_iterations",
+  "tca_convergence", "tca_tau_hat"
+)
+stopifnot(all(required_qc_metrics %in% qc_summary$metric))
+qc_status <- stats::setNames(qc_summary$status, qc_summary$metric)
+if (identical(expected_proportion_mode, "dtangle")) {
+  stopifnot(identical(qc_status[["lm22_value_validation"]], "passed"))
+} else {
+  stopifnot(identical(
+    qc_status[["lm22_value_validation"]],
+    "not_applicable_precomputed_mode"
+  ))
+}
+stopifnot(qc_status[["tca_convergence"]] %in% c(
+  "converged", "max_iterations_reached"
+))
+
 required_file_outputs <- c(
   "prepared_tca_cpm", "prepared_tca_log2_cpm",
   "prepared_dtangle_cpm", "prepared_dtangle_log2_cpm",
   "prepared_coordinates", "mapping_report",
-  "prepare_excluded_genes", "prepare_log", "cell_group_filter_report",
+  "prepare_excluded_genes", "prepare_log", "proportion_mode_validation_log",
+  "cell_group_filter_report",
   "proportions_log", "tca_model", "tca_model_log", "tca_excluded_genes",
   "fit_tca_log", "qc_summary", "qc_plots", "export_log",
-  "export_detail_log", "output_manifest", "manifest_log",
+  "export_detail_log", "output_manifest", "output_inventory", "manifest_log",
   "effective_parameters_file"
 )
 purrr::walk(required_file_outputs, function(name) {

@@ -11,9 +11,9 @@ All names below use the `cell_type_deconvolution` workflow namespace. The workfl
 | `lm22` | `File?` | dtangle | None | Linear expression | One gene-symbol column, 22 standard LM22 columns, unique trimmed genes, and finite positive values. Overlap meets `min_lm22_overlap`. | User-supplied LM22 signature. Omit in precomputed mode. |
 | `precomputed_proportions` | `File?` | precomputed | None | Relative proportion | One sample identifier column, 22 standard LM22 columns, and sample IDs that match prepared expression. | Precomputed LM22 proportions. Omit in dtangle mode. |
 | `covariates` | `File?` | Both | None | User-defined technical values | Sample IDs match TCA weights. Values are finite and numeric. | Optional mixture-level TCA covariates. |
-| `docker_image` | `String` | Both | None | N/A | A container image reference that the execution backend can read. | Image used by every task. |
+| `docker_image` | `String` | Both | None | N/A | Production values contain `@sha256:` followed by exactly 64 lowercase hexadecimal characters. The exact `celltype-deconvolution:test` tag is permitted only for local smoke CI. | Image used by every task. Replace the example digest placeholder before a production run. |
 | `pipeline_version` | `String` | Both | `"0.1.0"` | N/A | Non-empty version identifier. | Recorded in the manifest and output inventory. |
-| `min_lm22_overlap` | `Float` | dtangle | `0.80` | Fraction | Finite value from 0 through 1. | Minimum fraction of LM22 genes matched to bulk data. |
+| `min_lm22_overlap` | `Float` | dtangle | `0.80` | Fraction | Finite value greater than 0 and no greater than 1. | Minimum fraction of LM22 genes matched to bulk data. |
 | `dtangle_marker_fraction` | `Float` | dtangle | `0.10` | Fraction | Finite value greater than 0 and no greater than 1. | Fraction of ranked ratio markers used by dtangle. |
 | `dtangle_quantile_normalize` | `Boolean` | dtangle | `false` | N/A | Boolean. | Apply joint quantile normalization to dtangle-only data. |
 | `group_mean_threshold` | `Float` | Both | `0.0001` | Relative proportion | Finite non-negative value. | Remove a group when its cohort mean is below this value. |
@@ -63,6 +63,7 @@ All names below use the `cell_type_deconvolution` workflow namespace. The workfl
 | `mapping_report` | `File` | Both | N/A | N/A | One record per input expression row. | GTF mapping and duplicate-symbol report. |
 | `prepare_excluded_genes` | `File` | Both | N/A | N/A | Lists removed preparation rows and reasons. | Unmapped or invalid rows excluded during preparation. |
 | `prepare_log` | `File` | Both | N/A | N/A | Task command log exists. | Expression-preparation log. |
+| `proportion_mode_validation_log` | `File` | Both | N/A | N/A | Records exactly one selected mode. | Validation log for the `lm22` versus `precomputed_proportions` selection. |
 | `estimated_proportions` | `File?` | dtangle | N/A | Relative proportion | Has sample IDs and 22 LM22 columns. | Raw dtangle estimates. Absent in precomputed mode. |
 | `dtangle_markers` | `File?` | dtangle | N/A | N/A | Marker rows are from the dtangle fit. | Marker genes and counts. |
 | `dtangle_metadata` | `File?` | dtangle | N/A | N/A | JSON metadata exists. | dtangle settings and fitted gamma information. |
@@ -81,14 +82,14 @@ All names below use the `cell_type_deconvolution` workflow namespace. The workfl
 | `tca_excluded_genes` | `File` | Both | N/A | N/A | Lists constant-gene removal reasons. | Genes excluded before TCA fitting. |
 | `fit_tca_log` | `File` | Both | N/A | N/A | Task command log exists. | TCA-fit log. |
 | `cell_type_beds` | `Array[File]` | Both | N/A | `log2_cpm` | One unique `.bed.gz` path for each retained group. Each file preserves coordinates, modeled-gene order, and sample order. | Primary cell-group BED.GZ outputs. |
-| `cell_type_bed_inventory` | `File` | Both | N/A | `log2_cpm` | One row per retained group with path, dimensions, and scale. | BED output inventory. |
+| `cell_type_bed_inventory` | `File` | Both | N/A | `log2_cpm` | One row per retained group with a stable BED basename, dimensions, and scale. | BED output inventory. `cell_type_beds` is authoritative for localized files. |
 | `reconstruction_by_sample` | `File` | Both | N/A | `log2_cpm` | Contains per-sample reconstruction metrics. | TCA reconstruction quality control. |
-| `qc_summary` | `File` | Both | N/A | N/A | Quality-control summary exists. | Direct-export quality-control summary. |
+| `qc_summary` | `File` | Both | N/A | N/A | Records reconstruction metrics, LM22 validation when applicable, proportion row-sum errors, normalization adjustment, duplicate and exclusion counts, and TCA convergence. | Final pipeline quality-control summary. TCA convergence is derived from the model log because TCA 1.2.1 has no model convergence field. |
 | `qc_plots` | `File` | Both | N/A | N/A | Quality-control PDF exists. | Reconstruction quality-control plots. |
 | `export_log` | `File` | Both | N/A | N/A | Task command log exists. | Direct BED-export task log. |
 | `export_detail_log` | `File` | Both | N/A | N/A | R export log exists. | Detailed direct BED-export log. |
-| `output_manifest` | `File` | Both | N/A | N/A | Machine-readable JSON exists. | Output checksums and effective parameters. |
-| `output_inventory` | `File` | Both | N/A | N/A | Localized paths resolve during manifest creation. | Final provenance inventory. |
+| `output_manifest` | `File` | Both | N/A | N/A | Machine-readable JSON contains stable BED basenames and SHA-256 checksums. | Output checksums and effective parameters. Localized paths are used only during checksum calculation. |
+| `output_inventory` | `File` | Both | N/A | N/A | Contains one stable BED basename for each authoritative `cell_type_beds` file. | Portable final provenance inventory. |
 | `manifest_log` | `File` | Both | N/A | N/A | Task command log exists. | Manifest-creation log. |
 | `effective_parameters_file` | `File` | Both | N/A | N/A | JSON is written by the top-level workflow. | Effective defaults and user settings. |
 

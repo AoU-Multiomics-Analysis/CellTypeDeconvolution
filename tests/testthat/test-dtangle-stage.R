@@ -173,6 +173,24 @@ testthat::test_that("overlap report lists every LM22 gene in reference order", {
   )
 })
 
+testthat::test_that("LM22 QC records dimensions, value range, and validation", {
+  lm22 <- make_synthetic_lm22()
+  bulk_log <- matrix(
+    1,
+    nrow = nrow(lm22),
+    ncol = 1L,
+    dimnames = list(rownames(lm22), "S1")
+  )
+
+  inputs <- prepare_dtangle_inputs(bulk_log, lm22, 0.80, FALSE)
+
+  testthat::expect_identical(inputs$lm22_qc$gene_count, nrow(lm22))
+  testthat::expect_identical(inputs$lm22_qc$cell_type_count, 22L)
+  testthat::expect_equal(inputs$lm22_qc$value_min, min(lm22))
+  testthat::expect_equal(inputs$lm22_qc$value_max, max(lm22))
+  testthat::expect_identical(inputs$lm22_qc$validation_status, "passed")
+})
+
 testthat::test_that("joint quantile normalization uses joined log-scale profiles", {
   lm22 <- make_synthetic_lm22()
   bulk_log <- matrix(

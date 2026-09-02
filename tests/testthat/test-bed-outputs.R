@@ -47,6 +47,10 @@ testthat::test_that("cell-type BED files preserve coordinates and sample order",
     result$inventory$cell_group,
     c("CD4 T cells", "CD8 T cells")
   )
+  testthat::expect_identical(
+    result$inventory$path,
+    c("cd4_t_cells.bed.gz", "cd8_t_cells.bed.gz")
+  )
   testthat::expect_true(all(result$inventory$scale == "log2_cpm"))
 })
 
@@ -58,6 +62,25 @@ testthat::test_that("tensor validation rejects group and identifier mismatches",
   testthat::expect_error(
     validate_tensor_contract(tensor, c("g1", "g2"), c("S1", "S2"), c("A", "B")),
     "cell groups"
+  )
+})
+
+testthat::test_that("tensor validation rejects missing and empty source names", {
+  source_matrix <- matrix(
+    1:4,
+    nrow = 2L,
+    dimnames = list(c("g1", "g2"), c("S1", "S2"))
+  )
+  unnamed <- list(source_matrix)
+  empty_named <- stats::setNames(list(source_matrix), "")
+
+  testthat::expect_error(
+    validate_tensor_contract(unnamed, c("g1", "g2"), c("S1", "S2"), NULL),
+    "non-empty"
+  )
+  testthat::expect_error(
+    validate_tensor_contract(empty_named, c("g1", "g2"), c("S1", "S2"), ""),
+    "non-empty"
   )
 })
 
@@ -145,13 +168,296 @@ testthat::test_that("manifest records hashes, dimensions, and provenance", {
     pipeline_version = "test",
     tca_version = "1.2.1",
     parameters = list(scale = "log2_cpm"),
-    container_image = "example.org/pipeline@sha256:abc"
+    container_image = paste0(
+      "example.org/pipeline@sha256:",
+      paste(rep("a", 64L), collapse = "")
+    )
   )
 
   testthat::expect_identical(manifest$pipeline_version, "test")
   testthat::expect_identical(manifest$tca_version, "1.2.1")
   testthat::expect_identical(manifest$outputs[[1L]]$dimensions, c(2L, 3L))
+  testthat::expect_identical(manifest$outputs[[1L]]$path, basename(output_path))
+  testthat::expect_identical(manifest$outputs[[1L]]$file_name, basename(output_path))
+  testthat::expect_identical(
+    manifest$outputs[[1L]]$sha256,
+    digest::digest(file = output_path, algo = "sha256", serialize = FALSE)
+  )
   testthat::expect_match(manifest$outputs[[1L]]$sha256, "^[0-9a-f]{64}$")
+})
+
+testthat::test_that("manifest metadata rejects empty fields and fractional dimensions", {
+  output_path <- tempfile(fileext = ".bed.gz")
+  writeBin(charToRaw("bed-output"), output_path)
+  valid <- tibble::tibble(
+    logical_name = "a_expression",
+    path = output_path,
+    n_genes = 2,
+    n_samples = 3,
+    scale = "log2_cpm",
+    cell_group = "A"
+  )
+
+  for (field in c("logical_name", "scale", "cell_group")) {
+    invalid <- valid
+    invalid[[field]] <- ""
+    testthat::expect_error(validate_manifest_outputs(invalid), "non-empty")
+  }
+  invalid_dimensions <- valid
+  invalid_dimensions$n_genes <- 2.5
+  testthat::expect_error(
+    validate_manifest_outputs(invalid_dimensions),
+    "integer"
+  )
+})
+
+testthat::test_that("manifest provenance accepts only digests or the exact smoke tag", {
+  testthat::expect_true(exists("validate_container_image", mode = "function"))
+  if (!exists("validate_container_image", mode = "function")) {
+    return(invisible(NULL))
+  }
+  valid_digest <- paste0(
+    "ghcr.io/example/pipeline@sha256:",
+    paste(rep("0123456789abcdef", 4L), collapse = "")
+  )
+  testthat::expect_identical(validate_container_image(valid_digest), valid_digest)
+  testthat::expect_identical(
+    validate_container_image("celltype-deconvolution:test"),
+    "celltype-deconvolution:test"
+  )
+  purrr::walk(
+    c(
+      "ghcr.io/example/pipeline:latest",
+      "ghcr.io/example/pipeline@sha256:abc",
+      paste0("ghcr.io/example/pipeline@sha256:", paste(rep("A", 64L), collapse = "")),
+      "example:test"
+    ),
+    ~ testthat::expect_error(validate_container_image(.x), "immutable.*SHA-256")
+  )
+})
+
+testthat::test_that("constant exclusions are derived from prepared and modeled genes", {
+  testthat::expect_true(exists(
+    "count_excluded_constant_genes",
+    mode = "function"
+  ))
+  if (!exists("count_excluded_constant_genes", mode = "function")) {
+    return(invisible(NULL))
+  }
+  coordinates <- tibble::tibble(
+    `#chr` = rep("chr1", 3L),
+    start = c(0L, 10L, 20L),
+    end = c(5L, 15L, 25L),
+    gene_id = c("g1", "g2", "g3")
+  )
+
+  testthat::expect_identical(
+    count_excluded_constant_genes(coordinates, c("g1", "g3")),
+    1L
+  )
+  testthat::expect_error(
+    count_excluded_constant_genes(coordinates, c("g1", "missing")),
+    "modeled gene"
+  )
+})
+
+testthat::test_that("pipeline QC records validation, row sums, duplicates, and convergence", {
+  testthat::expect_true(exists("build_pipeline_qc_summary", mode = "function"))
+  if (!exists("build_pipeline_qc_summary", mode = "function")) {
+    return(invisible(NULL))
+  }
+  export_summary <- tibble::tibble(
+    metric = c("gene_count", "sample_count"),
+    value = c(3, 2)
+  )
+  mapping_report <- tibble::tibble(
+    gene_id = c("g1", "g2", "g3", "g4"),
+    gene_name = c("A", "A", "B", NA_character_),
+    mapping_action = c(
+      "duplicate_gene_name_aggregated_for_dtangle",
+      "duplicate_gene_name_aggregated_for_dtangle",
+      "mapped",
+      "missing_gene_name"
+    )
+  )
+  original <- matrix(
+    rep(1 / 22, 44L),
+    nrow = 2L,
+    dimnames = list(c("S1", "S2"), lm22_cell_types())
+  )
+  original[1L, 1L] <- original[1L, 1L] + 5e-7
+  combined <- matrix(
+    c(0.6, 0.4, 0.5, 0.5),
+    nrow = 2L,
+    byrow = TRUE,
+    dimnames = list(c("S1", "S2"), c("A", "B"))
+  )
+  weights <- matrix(
+    c(0.600001, 0.399999, 0.5, 0.5),
+    nrow = 2L,
+    byrow = TRUE,
+    dimnames = dimnames(combined)
+  )
+  filter_report <- tibble::tibble(
+    cell_group = c("A", "B"),
+    retained = c(TRUE, TRUE),
+    zero_count_before = c(1, 0),
+    zero_floor = c(1e-6, 1e-6)
+  )
+  model <- list(tau_hat = 0.25)
+  tca_log <- c(
+    "INFO Iteration 1 out of 10 internal iterations...",
+    "INFO Iteration 2 out of 10 internal iterations...",
+    "INFO Internal loop converged."
+  )
+  dtangle_metadata <- list(
+    lm22_qc = list(
+      gene_count = 66L,
+      cell_type_count = 22L,
+      value_min = 0.25,
+      value_max = 61.25,
+      validation_status = "passed"
+    )
+  )
+
+  summary <- build_pipeline_qc_summary(
+    export_summary = export_summary,
+    mapping_report = mapping_report,
+    original_proportions = original,
+    combined_proportions = combined,
+    tca_weights = weights,
+    filter_report = filter_report,
+    tca_model = model,
+    tca_log_lines = tca_log,
+    dtangle_metadata = dtangle_metadata
+  )
+  metric_value <- stats::setNames(summary$value, summary$metric)
+  metric_status <- stats::setNames(summary$status, summary$metric)
+
+  testthat::expect_equal(metric_value[["lm22_value_min"]], 0.25)
+  testthat::expect_equal(metric_value[["lm22_value_max"]], 61.25)
+  testthat::expect_identical(metric_status[["lm22_value_validation"]], "passed")
+  testthat::expect_equal(
+    metric_value[["input_proportion_max_row_sum_error"]],
+    5e-7,
+    tolerance = 1e-12
+  )
+  testthat::expect_equal(metric_value[["combined_proportion_max_row_sum_error"]], 0)
+  testthat::expect_equal(metric_value[["adjusted_weight_max_row_sum_error"]], 0)
+  testthat::expect_equal(metric_value[["normalization_adjustment_max_abs"]], 1e-6)
+  testthat::expect_equal(metric_value[["zero_values_adjusted"]], 1)
+  testthat::expect_equal(
+    metric_value[["duplicate_gene_symbol_input_row_count"]],
+    2
+  )
+  testthat::expect_equal(metric_value[["duplicate_gene_symbol_count"]], 1)
+  testthat::expect_equal(metric_value[["tca_internal_iterations"]], 2)
+  testthat::expect_equal(metric_value[["tca_max_internal_iterations"]], 10)
+  testthat::expect_identical(metric_status[["tca_convergence"]], "converged")
+  testthat::expect_equal(metric_value[["tca_tau_hat"]], 0.25)
+})
+
+testthat::test_that("manifest CLI hashes localized files and publishes basenames", {
+  working_directory <- tempfile("manifest cli inputs ")
+  dir.create(working_directory)
+  bed_path <- file.path(working_directory, "a group.bed.gz")
+  writeBin(charToRaw("localized-bed-content"), bed_path)
+  inventory_path <- file.path(working_directory, "checksum inventory.tsv")
+  readr::write_tsv(tibble::tibble(
+    logical_name = "a_group_expression",
+    path = bed_path,
+    n_genes = 2L,
+    n_samples = 2L,
+    scale = "log2_cpm",
+    cell_group = "A group"
+  ), inventory_path)
+  export_qc_path <- file.path(working_directory, "export qc.tsv")
+  readr::write_tsv(tibble::tibble(
+    metric = c("gene_count", "sample_count"),
+    value = c(2, 2)
+  ), export_qc_path)
+  mapping_path <- file.path(working_directory, "mapping report.tsv")
+  readr::write_tsv(tibble::tibble(
+    gene_id = c("g1", "g2"),
+    gene_name = c("G", "G"),
+    mapping_action = rep(
+      "duplicate_gene_name_aggregated_for_dtangle",
+      2L
+    )
+  ), mapping_path)
+  original <- matrix(
+    rep(1 / 22, 44L),
+    nrow = 2L,
+    dimnames = list(c("S1", "S2"), lm22_cell_types())
+  )
+  combined <- matrix(
+    c(0.6, 0.4, 0.5, 0.5),
+    nrow = 2L,
+    byrow = TRUE,
+    dimnames = list(c("S1", "S2"), c("A", "B"))
+  )
+  original_path <- file.path(working_directory, "original proportions.tsv")
+  combined_path <- file.path(working_directory, "combined proportions.tsv")
+  weights_path <- file.path(working_directory, "tca weights.tsv")
+  write_numeric_matrix(original, original_path, "sample_id")
+  write_numeric_matrix(combined, combined_path, "sample_id")
+  write_numeric_matrix(combined, weights_path, "sample_id")
+  filter_path <- file.path(working_directory, "filter report.tsv")
+  readr::write_tsv(tibble::tibble(
+    cell_group = c("A", "B"),
+    cohort_mean = c(0.55, 0.45),
+    threshold = c(0.0001, 0.0001),
+    retained = c(TRUE, TRUE),
+    filter_reason = c("retained", "retained"),
+    zero_count_before = c(0L, 0L),
+    zero_floor = c(1e-6, 1e-6)
+  ), filter_path)
+  model_path <- file.path(working_directory, "model.rds")
+  saveRDS(list(tau_hat = 0.25), model_path)
+  model_log_path <- file.path(working_directory, "model log.txt")
+  writeLines(c(
+    "Iteration 1 out of 10 internal iterations...",
+    "Internal loop converged."
+  ), model_log_path)
+  manifest_path <- file.path(working_directory, "output manifest.json")
+  qc_path <- file.path(working_directory, "final qc.tsv")
+  log_path <- file.path(working_directory, "manifest log.txt")
+  script <- testthat::test_path("../..", "scripts", "build_manifest.R")
+  arguments <- c(
+    script,
+    "--outputs", inventory_path,
+    "--export-qc-summary", export_qc_path,
+    "--mapping-report", mapping_path,
+    "--original-proportions", original_path,
+    "--combined-proportions", combined_path,
+    "--tca-weights", weights_path,
+    "--filter-report", filter_path,
+    "--model", model_path,
+    "--model-log", model_log_path,
+    "--pipeline-version", "test",
+    "--tca-version", "1.2.1",
+    "--container-image", "celltype-deconvolution:test",
+    "--output", manifest_path,
+    "--qc-output", qc_path,
+    "--log-file", log_path
+  )
+
+  status <- system2("Rscript", shQuote(arguments))
+
+  testthat::expect_identical(status, 0L)
+  manifest <- jsonlite::read_json(manifest_path, simplifyVector = FALSE)
+  testthat::expect_identical(
+    manifest$outputs[[1L]]$path,
+    basename(bed_path)
+  )
+  testthat::expect_identical(
+    manifest$outputs[[1L]]$sha256,
+    digest::digest(file = bed_path, algo = "sha256", serialize = FALSE)
+  )
+  final_qc <- readr::read_tsv(qc_path, show_col_types = FALSE)
+  testthat::expect_true(all(c(
+    "duplicate_gene_symbol_count", "tca_convergence"
+  ) %in% final_qc$metric))
 })
 
 testthat::test_that("QC plots use a minimal theme without titles", {

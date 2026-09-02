@@ -44,29 +44,27 @@ reconstruct_tensor <- function(
     C2 = NULL,
     deltas_hat = NULL) {
   validate_reconstruction_inputs(tensor, weights, C2, deltas_hat)
-  source_reconstruction <- Reduce(
-    `+`,
-    purrr::map2(
-      tensor,
-      seq_len(ncol(weights)),
-      ~ sweep(.x, 2L, weights[, .y], "*")
-    )
+  source_reconstruction <- matrix(
+    0,
+    nrow = nrow(tensor[[1L]]),
+    ncol = ncol(tensor[[1L]]),
+    dimnames = dimnames(tensor[[1L]])
   )
-  covariate_term <- if (is.null(C2) || ncol(C2) == 0L) {
-    matrix(
-      0,
-      nrow = nrow(source_reconstruction),
-      ncol = ncol(source_reconstruction),
-      dimnames = dimnames(source_reconstruction)
-    )
-  } else {
-    t(C2 %*% t(deltas_hat))
+  for (source_index in seq_along(tensor)) {
+    for (sample_index in seq_len(ncol(source_reconstruction))) {
+      source_reconstruction[, sample_index] <-
+        source_reconstruction[, sample_index] +
+        tensor[[source_index]][, sample_index] *
+        weights[sample_index, source_index]
+    }
   }
-  reconstructed <- source_reconstruction + covariate_term
-  if (any(!is.finite(reconstructed))) {
+  if (!is.null(C2) && ncol(C2) > 0L) {
+    source_reconstruction <- source_reconstruction + t(C2 %*% t(deltas_hat))
+  }
+  if (any(!is.finite(source_reconstruction))) {
     stop("Reconstructed values must be finite", call. = FALSE)
   }
-  reconstructed
+  source_reconstruction
 }
 
 sample_qc_values <- function(observed, reconstructed, maximum = 5000L) {
@@ -216,10 +214,15 @@ make_qc_plots <- function(weights, observed, reconstructed) {
   )
 }
 
-make_qc_summary <- function(reconstruction_by_sample, gene_count, group_count) {
+make_qc_summary <- function(
+    reconstruction_by_sample,
+    gene_count,
+    group_count,
+    excluded_constant_gene_count = 0L) {
   tibble::tibble(
     metric = c(
       "gene_count", "sample_count", "cell_group_count",
+      "excluded_constant_gene_count",
       "correlation_min", "correlation_median", "correlation_mean",
       "correlation_max", "rmse_min", "rmse_median", "rmse_mean",
       "rmse_max"
@@ -228,6 +231,7 @@ make_qc_summary <- function(reconstruction_by_sample, gene_count, group_count) {
       gene_count,
       nrow(reconstruction_by_sample),
       group_count,
+      excluded_constant_gene_count,
       min(reconstruction_by_sample$correlation),
       stats::median(reconstruction_by_sample$correlation),
       mean(reconstruction_by_sample$correlation),
@@ -246,6 +250,7 @@ write_qc_reports <- function(
     observed,
     reconstructed,
     gene_count,
+    excluded_constant_gene_count = 0L,
     output_dir) {
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   output_paths <- c(
@@ -258,7 +263,8 @@ write_qc_reports <- function(
   summary <- make_qc_summary(
     reconstruction_by_sample,
     gene_count,
-    ncol(weights)
+    ncol(weights),
+    excluded_constant_gene_count
   )
   plots <- make_qc_plots(weights, observed, reconstructed)
   readr::write_tsv(
@@ -273,6 +279,187 @@ write_qc_reports <- function(
   unname(grDevices::dev.off())
   on.exit(NULL, add = FALSE)
   output_paths
+}
+
+parse_tca_convergence <- function(tca_log_lines) {
+  if (!is.character(tca_log_lines) || length(tca_log_lines) == 0L) {
+    stop("TCA model log must contain text lines", call. = FALSE)
+  }
+  iteration_matches <- stringr::str_match(
+    tca_log_lines,
+    "Iteration ([0-9]+) out of ([0-9]+) internal iterations"
+  )
+  observed <- !is.na(iteration_matches[, 1L])
+  if (!any(observed)) {
+    stop("TCA model log does not contain internal iteration records", call. = FALSE)
+  }
+  iterations <- as.integer(iteration_matches[observed, 2L])
+  maximum_iterations <- as.integer(iteration_matches[observed, 3L])
+  if (anyNA(iterations) || anyNA(maximum_iterations)) {
+    stop("TCA model log contains invalid iteration records", call. = FALSE)
+  }
+  converged <- any(grepl(
+    "Internal loop converged.",
+    tca_log_lines,
+    fixed = TRUE
+  ))
+  list(
+    iterations = max(iterations),
+    maximum_iterations = max(maximum_iterations),
+    converged = converged,
+    status = if (converged) "converged" else "max_iterations_reached"
+  )
+}
+
+build_pipeline_qc_summary <- function(
+    export_summary,
+    mapping_report,
+    original_proportions,
+    combined_proportions,
+    tca_weights,
+    filter_report,
+    tca_model,
+    tca_log_lines,
+    dtangle_metadata = NULL) {
+  if (!inherits(export_summary, "data.frame") ||
+      !all(c("metric", "value") %in% names(export_summary)) ||
+      nrow(export_summary) == 0L || anyNA(export_summary$metric) ||
+      any(!nzchar(export_summary$metric)) ||
+      anyDuplicated(export_summary$metric) > 0L) {
+    stop("export_summary must contain unique metric and value columns", call. = FALSE)
+  }
+  if (!inherits(mapping_report, "data.frame") ||
+      !all(c("gene_id", "gene_name", "mapping_action") %in%
+        names(mapping_report))) {
+    stop("mapping_report is missing required mapping columns", call. = FALSE)
+  }
+  matrices <- list(
+    original_proportions = original_proportions,
+    combined_proportions = combined_proportions,
+    tca_weights = tca_weights
+  )
+  valid_matrices <- purrr::map_lgl(matrices, function(value) {
+    is.matrix(value) && is.numeric(value) && nrow(value) > 0L &&
+      ncol(value) > 0L && all(is.finite(value)) &&
+      !is.null(rownames(value)) && !is.null(colnames(value))
+  })
+  if (!all(valid_matrices)) {
+    stop("Proportion QC inputs must be finite non-empty matrices", call. = FALSE)
+  }
+  if (!identical(rownames(original_proportions), rownames(combined_proportions)) ||
+      !identical(rownames(combined_proportions), rownames(tca_weights))) {
+    stop("Proportion QC sample order must match exactly", call. = FALSE)
+  }
+  required_filter_columns <- c(
+    "cell_group", "retained", "zero_count_before", "zero_floor"
+  )
+  if (!inherits(filter_report, "data.frame") ||
+      !all(required_filter_columns %in% names(filter_report))) {
+    stop("filter_report is missing required adjustment columns", call. = FALSE)
+  }
+  retained_report <- filter_report |>
+    dplyr::filter(.data$retained) |>
+    dplyr::select(dplyr::all_of(required_filter_columns))
+  if (!identical(retained_report$cell_group, colnames(tca_weights)) ||
+      !all(retained_report$cell_group %in% colnames(combined_proportions))) {
+    stop("Retained group order must match TCA weight order", call. = FALSE)
+  }
+  adjusted_before_normalization <- combined_proportions[
+    , retained_report$cell_group, drop = FALSE
+  ]
+  for (group_index in seq_len(ncol(adjusted_before_normalization))) {
+    zero_values <- adjusted_before_normalization[, group_index] == 0
+    adjusted_before_normalization[zero_values, group_index] <-
+      retained_report$zero_floor[[group_index]]
+  }
+  if (!is.list(tca_model) || !is.numeric(tca_model$tau_hat) ||
+      length(tca_model$tau_hat) != 1L || !is.finite(tca_model$tau_hat)) {
+    stop("TCA model must contain one finite tau_hat value", call. = FALSE)
+  }
+  convergence <- parse_tca_convergence(tca_log_lines)
+  duplicate_action <-
+    mapping_report$mapping_action ==
+    "duplicate_gene_name_aggregated_for_dtangle"
+  duplicate_gene_names <- unique(mapping_report$gene_name[
+    duplicate_action & !is.na(mapping_report$gene_name) &
+      nzchar(mapping_report$gene_name)
+  ])
+  base_summary <- tibble::as_tibble(export_summary) |>
+    dplyr::transmute(
+      metric = as.character(.data$metric),
+      value = as.numeric(.data$value),
+      status = "observed"
+    )
+  proportion_summary <- tibble::tibble(
+    metric = c(
+      "input_proportion_max_row_sum_error",
+      "combined_proportion_max_row_sum_error",
+      "adjusted_weight_max_row_sum_error",
+      "normalization_adjustment_max_abs",
+      "zero_values_adjusted",
+      "duplicate_gene_symbol_input_row_count",
+      "duplicate_gene_symbol_count",
+      "tca_internal_iterations",
+      "tca_max_internal_iterations",
+      "tca_convergence",
+      "tca_tau_hat"
+    ),
+    value = c(
+      max(abs(rowSums(original_proportions) - 1)),
+      max(abs(rowSums(combined_proportions) - 1)),
+      max(abs(rowSums(tca_weights) - 1)),
+      max(abs(tca_weights - adjusted_before_normalization)),
+      sum(retained_report$zero_count_before),
+      sum(duplicate_action),
+      length(duplicate_gene_names),
+      convergence$iterations,
+      convergence$maximum_iterations,
+      as.numeric(convergence$converged),
+      tca_model$tau_hat
+    ),
+    status = c(
+      rep("passed", 9L),
+      convergence$status,
+      "fitted"
+    )
+  )
+  lm22_status <- if (is.null(dtangle_metadata)) {
+    tibble::tibble(
+      metric = c(
+        "lm22_gene_count", "lm22_cell_type_count",
+        "lm22_value_min", "lm22_value_max", "lm22_value_validation"
+      ),
+      value = rep(NA_real_, 5L),
+      status = "not_applicable_precomputed_mode"
+    )
+  } else {
+    required_lm22_fields <- c(
+      "gene_count", "cell_type_count", "value_min", "value_max",
+      "validation_status"
+    )
+    if (!is.list(dtangle_metadata) ||
+        !is.list(dtangle_metadata$lm22_qc) ||
+        !all(required_lm22_fields %in% names(dtangle_metadata$lm22_qc)) ||
+        !identical(dtangle_metadata$lm22_qc$validation_status, "passed")) {
+      stop("dtangle metadata is missing passed LM22 QC", call. = FALSE)
+    }
+    qc <- dtangle_metadata$lm22_qc
+    tibble::tibble(
+      metric = c(
+        "lm22_gene_count", "lm22_cell_type_count",
+        "lm22_value_min", "lm22_value_max", "lm22_value_validation"
+      ),
+      value = c(
+        as.numeric(qc$gene_count),
+        as.numeric(qc$cell_type_count),
+        as.numeric(qc$value_min),
+        as.numeric(qc$value_max),
+        1
+      ),
+      status = "passed"
+    )
+  }
+  dplyr::bind_rows(base_summary, lm22_status, proportion_summary)
 }
 
 validate_manifest_outputs <- function(outputs) {
@@ -291,15 +478,54 @@ validate_manifest_outputs <- function(outputs) {
     )
   }
   outputs <- tibble::as_tibble(outputs)
+  character_fields <- c("logical_name", "path", "scale", "cell_group")
+  valid_character_fields <- purrr::map_lgl(
+    outputs[character_fields],
+    ~ is.character(.x) && !anyNA(.x) && all(nzchar(trimws(.x)))
+  )
+  if (!all(valid_character_fields)) {
+    stop(
+      "Manifest logical names, paths, scales, and cell groups must be non-empty",
+      call. = FALSE
+    )
+  }
   if (nrow(outputs) == 0L || anyDuplicated(outputs$logical_name) > 0L ||
+      anyDuplicated(outputs$path) > 0L ||
+      anyDuplicated(outputs$cell_group) > 0L ||
       any(!file.exists(outputs$path))) {
     stop("Manifest outputs must be unique existing files", call. = FALSE)
   }
-  if (anyNA(outputs$n_genes) || anyNA(outputs$n_samples) ||
-      any(outputs$n_genes < 1L) || any(outputs$n_samples < 1L)) {
-    stop("Manifest output dimensions must be positive", call. = FALSE)
+  dimensions <- c(outputs$n_genes, outputs$n_samples)
+  if (!is.numeric(dimensions) || anyNA(dimensions) ||
+      any(!is.finite(dimensions)) || any(dimensions < 1) ||
+      any(dimensions != floor(dimensions))) {
+    stop(
+      "Manifest output dimensions must be positive integer values",
+      call. = FALSE
+    )
   }
+  outputs$n_genes <- as.integer(outputs$n_genes)
+  outputs$n_samples <- as.integer(outputs$n_samples)
   outputs
+}
+
+validate_container_image <- function(container_image) {
+  local_smoke_image <- "celltype-deconvolution:test"
+  digest_pattern <- "^[^[:space:]@]+@sha256:[0-9a-f]{64}$"
+  valid <- is.character(container_image) && length(container_image) == 1L &&
+    !is.na(container_image) &&
+    (identical(container_image, local_smoke_image) ||
+      grepl(digest_pattern, container_image))
+  if (!valid) {
+    stop(
+      paste0(
+        "container_image must use an immutable SHA-256 digest or equal ",
+        "celltype-deconvolution:test for local smoke CI"
+      ),
+      call. = FALSE
+    )
+  }
+  container_image
 }
 
 build_output_manifest <- function(
@@ -315,6 +541,7 @@ build_output_manifest <- function(
   if (!is.list(parameters)) {
     stop("parameters must be a named list", call. = FALSE)
   }
+  container_image <- validate_container_image(container_image)
   output_entries <- purrr::pmap(outputs, function(
       logical_name,
       path,
@@ -326,7 +553,7 @@ build_output_manifest <- function(
     list(
       logical_name = as.character(logical_name),
       file_name = basename(path),
-      path = normalizePath(path),
+      path = basename(path),
       sha256 = digest::digest(
         file = path,
         algo = "sha256",

@@ -15,6 +15,60 @@ run_build_manifest <- function() {
       help = "TSV output inventory from direct BED export."
     ),
     optparse::make_option(
+      "--export-qc-summary",
+      dest = "export_qc_summary",
+      type = "character",
+      help = "Direct BED export QC summary TSV."
+    ),
+    optparse::make_option(
+      "--mapping-report",
+      dest = "mapping_report",
+      type = "character",
+      help = "Gene mapping report TSV from expression preparation."
+    ),
+    optparse::make_option(
+      "--original-proportions",
+      dest = "original_proportions",
+      type = "character",
+      help = "Sample-by-LM22 proportion TSV."
+    ),
+    optparse::make_option(
+      "--combined-proportions",
+      dest = "combined_proportions",
+      type = "character",
+      help = "Sample-by-combined-group proportion TSV."
+    ),
+    optparse::make_option(
+      "--tca-weights",
+      dest = "tca_weights",
+      type = "character",
+      help = "Sample-by-retained-group TCA weight TSV."
+    ),
+    optparse::make_option(
+      "--filter-report",
+      dest = "filter_report",
+      type = "character",
+      help = "Cell-group filter and zero-adjustment report TSV."
+    ),
+    optparse::make_option(
+      "--model",
+      type = "character",
+      help = "Fitted TCA model RDS."
+    ),
+    optparse::make_option(
+      "--model-log",
+      dest = "model_log",
+      type = "character",
+      help = "TCA model log with internal iteration records."
+    ),
+    optparse::make_option(
+      "--dtangle-metadata",
+      dest = "dtangle_metadata",
+      type = "character",
+      default = NULL,
+      help = "Optional dtangle metadata JSON with LM22 QC."
+    ),
+    optparse::make_option(
       "--pipeline-version",
       dest = "pipeline_version",
       type = "character",
@@ -46,6 +100,12 @@ run_build_manifest <- function() {
       help = "Output manifest JSON path."
     ),
     optparse::make_option(
+      "--qc-output",
+      dest = "qc_output",
+      type = "character",
+      help = "Final pipeline QC summary TSV path."
+    ),
+    optparse::make_option(
       "--log-file",
       dest = "log_file",
       type = "character",
@@ -57,7 +117,10 @@ run_build_manifest <- function() {
     option_list = option_list
   ))
   required_options <- c(
-    "outputs", "pipeline_version", "container_image", "output"
+    "outputs", "export_qc_summary", "mapping_report",
+    "original_proportions", "combined_proportions", "tca_weights",
+    "filter_report", "model", "model_log", "pipeline_version",
+    "container_image", "output", "qc_output"
   )
   missing_options <- required_options[vapply(
     options[required_options],
@@ -73,7 +136,10 @@ run_build_manifest <- function() {
       call. = FALSE
     )
   }
-  dir.create(dirname(options$output), recursive = TRUE, showWarnings = FALSE)
+  purrr::walk(
+    unique(c(dirname(options$output), dirname(options$qc_output))),
+    ~ dir.create(.x, recursive = TRUE, showWarnings = FALSE)
+  )
   manifest_log_path <<- if (is.null(options$log_file)) {
     paste0(options$output, ".log")
   } else {
@@ -92,6 +158,48 @@ run_build_manifest <- function() {
     show_col_types = FALSE,
     progress = FALSE
   )
+  export_qc_summary <- readr::read_tsv(
+    options$export_qc_summary,
+    show_col_types = FALSE,
+    progress = FALSE
+  )
+  mapping_report <- readr::read_tsv(
+    options$mapping_report,
+    col_types = readr::cols(.default = readr::col_character()),
+    show_col_types = FALSE,
+    progress = FALSE
+  )
+  original_proportions <- read_numeric_matrix(
+    options$original_proportions,
+    "sample_id"
+  )
+  combined_proportions <- read_numeric_matrix(
+    options$combined_proportions,
+    "sample_id"
+  )
+  tca_weights <- read_numeric_matrix(options$tca_weights, "sample_id")
+  filter_report <- readr::read_tsv(
+    options$filter_report,
+    col_types = readr::cols(
+      cell_group = readr::col_character(),
+      cohort_mean = readr::col_double(),
+      threshold = readr::col_double(),
+      retained = readr::col_logical(),
+      filter_reason = readr::col_character(),
+      zero_count_before = readr::col_integer(),
+      zero_floor = readr::col_double()
+    ),
+    show_col_types = FALSE,
+    progress = FALSE
+  )
+  tca_model <- readRDS(options$model)
+  tca_log_lines <- readLines(options$model_log, warn = FALSE)
+  dtangle_metadata <- if (is.null(options$dtangle_metadata) ||
+      !nzchar(options$dtangle_metadata)) {
+    NULL
+  } else {
+    jsonlite::read_json(options$dtangle_metadata, simplifyVector = FALSE)
+  }
   parameters <- if (is.null(options$parameters_json) ||
       !nzchar(options$parameters_json)) {
     list(scale = "log2_cpm")
@@ -99,13 +207,19 @@ run_build_manifest <- function() {
     jsonlite::read_json(options$parameters_json, simplifyVector = FALSE)
   }
   dimensions_message <- sprintf(
-    "stage=manifest input_dimensions=outputs:%d",
-    nrow(outputs)
+    paste0(
+      "stage=manifest input_dimensions=outputs:%d samples:%d ",
+      "lm22_types:%d retained_groups:%d"
+    ),
+    nrow(outputs),
+    nrow(original_proportions),
+    ncol(original_proportions),
+    ncol(tca_weights)
   )
   paths_message <- sprintf(
     "stage=manifest input_paths=%s output_paths=%s",
     options$outputs,
-    options$output
+    paste(c(options$output, options$qc_output), collapse = ",")
   )
   message(dimensions_message)
   message(paths_message)
@@ -119,11 +233,27 @@ run_build_manifest <- function() {
     parameters = parameters,
     container_image = options$container_image
   )
+  qc_summary <- build_pipeline_qc_summary(
+    export_summary = export_qc_summary,
+    mapping_report = mapping_report,
+    original_proportions = original_proportions,
+    combined_proportions = combined_proportions,
+    tca_weights = tca_weights,
+    filter_report = filter_report,
+    tca_model = tca_model,
+    tca_log_lines = tca_log_lines,
+    dtangle_metadata = dtangle_metadata
+  )
   write_output_manifest(options$output, manifest)
+  readr::write_tsv(qc_summary, options$qc_output, na = "")
   complete_message <- sprintf(
-    "stage=manifest event=stage_complete outputs=%d output_paths=%s",
+    paste0(
+      "stage=manifest event=stage_complete outputs=%d qc_metrics=%d ",
+      "output_paths=%s"
+    ),
     length(manifest$outputs),
-    options$output
+    nrow(qc_summary),
+    paste(c(options$output, options$qc_output), collapse = ",")
   )
   message(sprintf("%s utc_complete=%s", complete_message, tensor_utc_time()))
   append_tensor_log(manifest_log_path, complete_message)

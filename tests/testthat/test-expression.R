@@ -38,6 +38,55 @@ testthat::test_that("duplicate gene names are summed without CPM renormalization
   )
 })
 
+testthat::test_that("duplicate aggregation preserves first gene-symbol order and exact values", {
+  cpm <- matrix(
+    c(
+      1, 10,
+      2, 20,
+      4, 40,
+      8, 80
+    ),
+    nrow = 4L,
+    byrow = TRUE,
+    dimnames = list(c("g1", "g2", "g3", "g4"), c("S1", "S2"))
+  )
+  annotation <- tibble::tibble(
+    gene_id = c("g4", "g2", "g1", "g3"),
+    gene_name = c("C", "A", "B", "B"),
+    gene_type = "protein_coding"
+  )
+
+  observed <- collapse_cpm_to_gene_names(cpm, annotation)
+
+  testthat::expect_identical(rownames(observed), c("B", "A", "C"))
+  testthat::expect_equal(
+    unname(observed),
+    matrix(c(5, 50, 2, 20, 8, 80), nrow = 3L, byrow = TRUE)
+  )
+})
+
+testthat::test_that("duplicate aggregation does not pivot the full expression matrix", {
+  cpm <- matrix(
+    c(1, 2, 3, 4),
+    nrow = 2L,
+    dimnames = list(c("g1", "g2"), c("S1", "S2"))
+  )
+  annotation <- tibble::tibble(
+    gene_id = c("g1", "g2"),
+    gene_name = c("A", "A"),
+    gene_type = "protein_coding"
+  )
+  trace(
+    "pivot_longer",
+    where = asNamespace("tidyr"),
+    tracer = quote(stop("full-matrix pivot detected", call. = FALSE)),
+    print = FALSE
+  )
+  on.exit(untrace("pivot_longer", where = asNamespace("tidyr")), add = TRUE)
+
+  testthat::expect_no_error(collapse_cpm_to_gene_names(cpm, annotation))
+})
+
 testthat::test_that("BED preparation preserves gene IDs and collapses only dtangle symbols", {
   bed_path <- tempfile(fileext = ".bed.gz")
   input <- tibble::tibble(

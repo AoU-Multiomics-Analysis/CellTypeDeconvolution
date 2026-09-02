@@ -94,6 +94,10 @@ run_export_tca_beds <- function() {
   if (!is.null(C2) && ncol(C2) > 0L && !identical(rownames(C2), colnames(X))) {
     stop("Covariate sample order must match expression sample order exactly", call. = FALSE)
   }
+  excluded_constant_genes <- count_excluded_constant_genes(
+    coordinates,
+    rownames(X)
+  )
   coordinate_index <- match(rownames(X), coordinates$gene_id)
   if (anyNA(coordinate_index)) {
     stop("Every modeled gene_id must have BED coordinates", call. = FALSE)
@@ -136,6 +140,7 @@ run_export_tca_beds <- function() {
     observed = qc_points$observed,
     reconstructed = qc_points$reconstructed,
     gene_count = nrow(X),
+    excluded_constant_gene_count = excluded_constant_genes,
     output_dir = options$output_dir
   )
   inventory_path <- file.path(options$output_dir, "cell_type_bed_inventory.tsv")
@@ -144,8 +149,9 @@ run_export_tca_beds <- function() {
     unname(bed_result$paths), inventory_path, unname(qc_paths)
   )
   complete_message <- sprintf(
-    "stage=export_tca_beds event=stage_complete output_dimensions=genes:%d samples:%d groups:%d excluded_constant_genes:0 output_paths=%s scale=log2_cpm",
-    nrow(X), ncol(X), ncol(weights), paste(output_paths, collapse = ",")
+    "stage=export_tca_beds event=stage_complete output_dimensions=genes:%d samples:%d groups:%d excluded_constant_genes:%d output_paths=%s scale=log2_cpm",
+    nrow(X), ncol(X), ncol(weights), excluded_constant_genes,
+    paste(output_paths, collapse = ",")
   )
   message(sprintf("%s utc_complete=%s", complete_message, tensor_utc_time()))
   append_tensor_log(export_log_path, complete_message)

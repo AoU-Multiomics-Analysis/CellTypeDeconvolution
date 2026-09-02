@@ -16,7 +16,9 @@ Use dtangle mode when you set `lm22` and omit `precomputed_proportions`. LM22 is
 
 Use precomputed mode when you set `precomputed_proportions` and omit `lm22`. The input needs one sample identifier column and all 22 standard LM22 proportion columns. Sample IDs must match the prepared expression matrix.
 
-Both modes require `expression`, `gtf`, and `docker_image`. Use a published GHCR image tag in Terra. `celltype-deconvolution:test` is only for repository smoke runs.
+Provide exactly one of `lm22` and `precomputed_proportions`. A validation task records the selected mode. The workflow stops before proportion-file selection if you provide both files or neither file.
+
+Both modes require `expression`, `gtf`, and `docker_image`. In Terra, use an immutable image reference with `@sha256:` followed by exactly 64 lowercase hexadecimal characters. Replace the digest placeholder in the examples before a production run. The exact tag `celltype-deconvolution:test` is permitted only for local repository smoke CI.
 
 ## Analysis settings
 
@@ -47,13 +49,15 @@ Default resources support an initial whole-blood run of about 9,000 samples. TCA
 
 The workflow does one direct tensor extraction. It writes one BED.GZ file per retained major cell group. Each file uses the `log2_cpm` model scale. It preserves `#chr`, `start`, `end`, `gene_id`, modeled-gene order, and sample-column order. It excludes unmapped and constant genes. The values are statistical TCA estimates. They are not counts, linear CPM, or absolute expression values.
 
-The workflow writes proportions, filter reports, the fitted TCA model, a BED inventory, reconstruction quality control, logs, an output inventory, and a machine-readable manifest. See [the data dictionary](data-dictionary.md) for exact names.
+The workflow writes proportions, filter reports, the fitted TCA model, a BED inventory, reconstruction quality control, logs, an output inventory, and a machine-readable manifest. `cell_type_beds` is the authoritative file array. Public inventories and the manifest use stable BED basenames, so task-localized paths do not leak into metadata. The manifest task keeps localized paths only while it calculates checksums.
+
+The final QC summary records LM22 value validation in dtangle mode. It also records maximum proportion row-sum errors, normalization adjustment, adjusted-zero counts, duplicate counts, constant-gene exclusions, reconstruction metrics, and TCA convergence. TCA 1.2.1 does not put a convergence field in its model object. The workflow derives the convergence status and iteration count from the TCA model log.
 
 Migration note: the workflow does not produce HDF5 or tensor shards.
 
 ## Validation and support
 
-GitHub Actions builds the pinned image. It runs R lint, R tests, WDL validation, command-logging checks, and dtangle and precomputed smoke workflows. The smoke workflows check BED coordinates and sample order. A local Docker build is not required for a smoke test.
+GitHub Actions builds the pinned image. It runs R lint, R tests, WDL validation, command-logging checks, and dtangle and precomputed smoke workflows. The smoke workflows check the exact ordered 22 LM22 columns, BED coordinates, and sample order. A local Docker build is not required for a smoke test.
 
 LM22 is not distributed with this repository. Review and comply with the LM22 source license and terms before use.
 

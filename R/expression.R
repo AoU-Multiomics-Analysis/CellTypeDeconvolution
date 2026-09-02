@@ -143,11 +143,10 @@ read_gtf_gene_annotation <- function(path, chunk_size = 100000L) {
 collapse_cpm_to_gene_names <- function(cpm, annotation) {
   cpm <- validate_cpm_matrix(cpm)
   annotation <- validate_gtf_gene_annotation(annotation)
-  mapped_annotation <- annotation |>
-    dplyr::filter(.data$gene_id %in% rownames(cpm)) |>
-    dplyr::filter(!is.na(.data$gene_name), nzchar(.data$gene_name)) |>
-    dplyr::select("gene_id", "gene_name")
-  if (nrow(mapped_annotation) == 0L) {
+  annotation_index <- match(rownames(cpm), annotation$gene_id)
+  mapped_gene_names <- annotation$gene_name[annotation_index]
+  usable <- !is.na(mapped_gene_names) & nzchar(mapped_gene_names)
+  if (!any(usable)) {
     return(matrix(
       numeric(),
       nrow = 0L,
@@ -156,17 +155,17 @@ collapse_cpm_to_gene_names <- function(cpm, annotation) {
     ))
   }
 
-  collapsed <- tibble::as_tibble(cpm, rownames = "gene_id") |>
-    tidyr::pivot_longer(-"gene_id", names_to = "sample_id", values_to = "cpm") |>
-    dplyr::inner_join(mapped_annotation, by = "gene_id") |>
-    dplyr::group_by(.data$gene_name, .data$sample_id) |>
-    dplyr::summarise(cpm = sum(.data$cpm), .groups = "drop") |>
-    tidyr::pivot_wider(names_from = "sample_id", values_from = "cpm") |>
-    dplyr::select("gene_name", dplyr::all_of(colnames(cpm)))
-
-  output <- as.matrix(dplyr::select(collapsed, -"gene_name"))
+  mapped_gene_names <- mapped_gene_names[usable]
+  gene_name_order <- unique(mapped_gene_names)
+  group_index <- match(mapped_gene_names, gene_name_order)
+  output <- rowsum(
+    cpm[usable, , drop = FALSE],
+    group = group_index,
+    reorder = FALSE
+  )
   storage.mode(output) <- "double"
-  rownames(output) <- collapsed$gene_name
+  rownames(output) <- gene_name_order
+  colnames(output) <- colnames(cpm)
   output
 }
 

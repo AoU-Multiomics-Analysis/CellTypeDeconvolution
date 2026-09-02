@@ -102,7 +102,14 @@ validate_tensor_contract <- function(
     gene_ids,
     sample_ids,
     cell_groups) {
-  if (!is.list(tensor) || !identical(names(tensor), cell_groups)) {
+  if (!is.character(cell_groups) || length(cell_groups) == 0L ||
+      anyNA(cell_groups) || any(!nzchar(cell_groups)) ||
+      anyDuplicated(cell_groups) > 0L) {
+    stop("Tensor cell groups must be unique and non-empty", call. = FALSE)
+  }
+  if (!is.list(tensor) || is.null(names(tensor)) ||
+      anyNA(names(tensor)) || any(!nzchar(names(tensor))) ||
+      !identical(names(tensor), cell_groups)) {
     stop("Tensor cell groups must match the TCA weights exactly", call. = FALSE)
   }
   slugs <- slugify_cell_group(cell_groups)
@@ -120,6 +127,25 @@ validate_tensor_contract <- function(
     stop("Tensor genes, samples, dimensions, and values must match", call. = FALSE)
   }
   invisible(TRUE)
+}
+
+count_excluded_constant_genes <- function(coordinates, modeled_gene_ids) {
+  if (!inherits(coordinates, "data.frame") ||
+      !"gene_id" %in% names(coordinates) ||
+      anyNA(coordinates$gene_id) || any(!nzchar(coordinates$gene_id)) ||
+      anyDuplicated(coordinates$gene_id) > 0L) {
+    stop("coordinates must contain unique non-empty gene_id values", call. = FALSE)
+  }
+  if (!is.character(modeled_gene_ids) || length(modeled_gene_ids) == 0L ||
+      anyNA(modeled_gene_ids) || any(!nzchar(modeled_gene_ids)) ||
+      anyDuplicated(modeled_gene_ids) > 0L ||
+      !all(modeled_gene_ids %in% coordinates$gene_id)) {
+    stop(
+      "Every modeled gene must occur once in the prepared coordinates",
+      call. = FALSE
+    )
+  }
+  as.integer(nrow(coordinates) - length(modeled_gene_ids))
 }
 
 extract_full_tensor <- function(X, model, num_cores = 1L, log_file = NULL) {
@@ -199,7 +225,7 @@ write_cell_type_beds <- function(tensor, coordinates, output_dir) {
   })
   inventory <- tibble::tibble(
     logical_name = paste0(slugify_cell_group(names(paths)), "_expression"),
-    path = unname(normalizePath(paths)),
+    path = basename(unname(paths)),
     n_genes = nrow(tensor[[1L]]),
     n_samples = ncol(tensor[[1L]]),
     scale = "log2_cpm",

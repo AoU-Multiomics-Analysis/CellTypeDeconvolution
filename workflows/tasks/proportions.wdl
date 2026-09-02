@@ -1,5 +1,52 @@
 version 1.1
 
+task ValidateProportionMode {
+  input {
+    File? lm22
+    File? precomputed_proportions
+    String docker_image
+    Int cpu = 1
+    String memory = "1 GB"
+    Int disk_gb = 10
+    Int preemptible_attempts = 0
+    Int max_retries = 0
+  }
+
+  command <<<
+    set -euo pipefail
+    stage="validate_proportion_mode"
+    log="$stage.log"
+    status=0
+    printf 'stage=%s start_time=%s\n' "$stage" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
+    trap 'status=$?; printf "stage=%s error_status=%s time=%s\\n" "$stage" "$status" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"; exit "$status"' ERR
+    Rscript /opt/celltype/scripts/validate_proportion_mode.R \
+      --lm22-defined '~{defined(lm22)}' \
+      --precomputed-defined '~{defined(precomputed_proportions)}' \
+      --output-dir outputs 2>&1 | tee -a "$log"
+    printf 'stage=%s dimensions=%s outputs=%s completion_time=%s\n' \
+      "$stage" "inputs:2" \
+      "selected_mode,estimate_proportions" \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$log"
+  >>>
+
+  output {
+    String selected_mode = read_string("outputs/selected_mode.txt")
+    Boolean estimate_proportions = read_boolean(
+      "outputs/estimate_proportions.txt"
+    )
+    File log = "validate_proportion_mode.log"
+  }
+
+  runtime {
+    docker: docker_image
+    cpu: cpu
+    memory: memory
+    disks: "local-disk ~{disk_gb} HDD"
+    preemptible: preemptible_attempts
+    maxRetries: max_retries
+  }
+}
+
 task ProcessProportions {
   input {
     File proportions

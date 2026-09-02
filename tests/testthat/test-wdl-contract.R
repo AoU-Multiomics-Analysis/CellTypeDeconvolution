@@ -31,11 +31,14 @@ testthat::test_that("smoke assertions require unique compressed BED paths", {
   )
   purrr::walk(c(
     "cell_type_bed_paths <- normalizePath(cell_type_beds)",
-    "inventory_paths <- normalizePath(inventory$path)",
+    "inventory_basenames <- inventory$path",
     "all(grepl(\"[.]bed[.]gz$\", cell_type_bed_paths))",
     "anyDuplicated(cell_type_bed_paths) == 0L",
-    "all(grepl(\"[.]bed[.]gz$\", inventory_paths))",
-    "anyDuplicated(inventory_paths) == 0L"
+    "all(grepl(\"^[^/]+[.]bed[.]gz$\", inventory_basenames))",
+    "anyDuplicated(inventory_basenames) == 0L",
+    "setequal(basename(cell_type_bed_paths), inventory_basenames)",
+    "public_inventory <- readr::read_tsv(",
+    "stopifnot(identical(public_inventory, inventory))"
   ), ~ testthat::expect_match(smoke_assertions, .x, fixed = TRUE))
 })
 
@@ -95,6 +98,44 @@ testthat::test_that("top workflow uses one direct BED export", {
   ))
   testthat::expect_false(grepl(
     "prepared_log2_cpm = RunDtangle.shared_bulk",
+    text,
+    fixed = TRUE
+  ))
+})
+
+testthat::test_that("top workflow validates exactly one proportion mode before selection", {
+  text <- wdl_text("workflows/cell_type_deconvolution.wdl")
+  proportions_text <- wdl_text("workflows/tasks/proportions.wdl")
+
+  testthat::expect_match(
+    proportions_text,
+    "task ValidateProportionMode",
+    fixed = TRUE
+  )
+  purrr::walk(c(
+    "File? lm22", "File? precomputed_proportions",
+    "String selected_mode", "Boolean estimate_proportions"
+  ), ~ testthat::expect_match(proportions_text, .x, fixed = TRUE))
+  testthat::expect_match(
+    text,
+    "call proportion_tasks.ValidateProportionMode",
+    fixed = TRUE
+  )
+  testthat::expect_match(
+    text,
+    "if (ValidateProportionMode.estimate_proportions)",
+    fixed = TRUE
+  )
+  testthat::expect_match(
+    text,
+    paste0(
+      "File proportions_for_processing = if ",
+      "ValidateProportionMode.estimate_proportions"
+    ),
+    fixed = TRUE
+  )
+  testthat::expect_false(grepl(
+    "Boolean estimate_proportions = !defined(precomputed_proportions)",
     text,
     fixed = TRUE
   ))
@@ -185,6 +226,34 @@ testthat::test_that("synthetic smoke fixtures are deterministic and restart with
     1e-6
   )
   testthat::expect_identical(dim(signature), c(66L, 23L))
+  expected_lm22_types <- c(
+    "B cells naive", "B cells memory", "Plasma cells", "T cells CD8",
+    "T cells CD4 naive", "T cells CD4 memory resting",
+    "T cells CD4 memory activated", "T cells follicular helper",
+    "T cells regulatory (Tregs)", "T cells gamma delta",
+    "NK cells resting", "NK cells activated", "Monocytes",
+    "Macrophages M0", "Macrophages M1", "Macrophages M2",
+    "Dendritic cells resting", "Dendritic cells activated",
+    "Mast cells resting", "Mast cells activated", "Eosinophils", "Neutrophils"
+  )
+  testthat::expect_identical(names(signature)[-1L], expected_lm22_types)
+  signature_values <- as.matrix(signature[-1L])
+  designated_markers <- purrr::map2(
+    seq_along(expected_lm22_types),
+    expected_lm22_types,
+    function(cell_type_index, cell_type) {
+      observed <- signature$gene_symbol[
+        signature_values[, cell_type_index] > 60
+      ]
+      expected <- sprintf(
+        "SYN_GENE_%03d",
+        (3L * cell_type_index - 2L):(3L * cell_type_index)
+      )
+      testthat::expect_identical(observed, expected, info = cell_type)
+      observed
+    }
+  )
+  testthat::expect_true(all(lengths(designated_markers) == 3L))
   expected_gene_ids <- readLines(
     file.path(first, "expected_gene_ids.txt"),
     warn = FALSE
@@ -277,6 +346,12 @@ testthat::test_that("all modular WDL tasks declare CLI-aligned interfaces", {
     c("Int cpu = 2", "String memory = \"16 GB\"", "Int disk_gb = 50",
       "Int preemptible_attempts = 2", "Int max_retries = 2")
   )
+  proportions_text <- wdl_text("workflows/tasks/proportions.wdl")
+  purrr::walk(c(
+    "task ValidateProportionMode", "File? lm22",
+    "File? precomputed_proportions", "String selected_mode",
+    "Boolean estimate_proportions", "File log"
+  ), ~ testthat::expect_match(proportions_text, .x, fixed = TRUE))
   tca_text <- wdl_text("workflows/tasks/tca.wdl")
   testthat::expect_match(tca_text, "task FitTca", fixed = TRUE)
   purrr::walk(c(
@@ -302,6 +377,87 @@ testthat::test_that("all modular WDL tasks declare CLI-aligned interfaces", {
     "Int cpu = 4", "String memory = \"32 GB\"", "Int disk_gb = 100",
     "Int preemptible_attempts = 1", "Int max_retries = 2"
   ), ~ testthat::expect_match(qc_text, .x, fixed = TRUE))
+})
+
+testthat::test_that("optional WDL file arguments use quoted shell arrays", {
+  tca_text <- wdl_text("workflows/tasks/tca.wdl")
+  qc_text <- wdl_text("workflows/tasks/qc.wdl")
+
+  testthat::expect_identical(
+    stringr::str_count(
+      tca_text,
+      stringr::fixed('covariates_arguments=()')
+    ),
+    2L
+  )
+  testthat::expect_identical(
+    stringr::str_count(
+      tca_text,
+      stringr::fixed(
+        'covariates_arguments=(--covariates "$covariates_path")'
+      )
+    ),
+    2L
+  )
+  testthat::expect_identical(
+    stringr::str_count(
+      tca_text,
+      stringr::fixed('"${covariates_arguments[@]}"')
+    ),
+    2L
+  )
+  testthat::expect_match(qc_text, "parameters_arguments=()", fixed = TRUE)
+  testthat::expect_match(
+    qc_text,
+    'parameters_arguments=(--parameters-json "$parameters_path")',
+    fixed = TRUE
+  )
+  testthat::expect_match(
+    qc_text,
+    '"${parameters_arguments[@]}"',
+    fixed = TRUE
+  )
+  testthat::expect_match(
+    qc_text,
+    'dtangle_metadata_arguments=()',
+    fixed = TRUE
+  )
+  testthat::expect_match(
+    qc_text,
+    'dtangle_metadata_arguments=(--dtangle-metadata "$dtangle_metadata_path")',
+    fixed = TRUE
+  )
+  testthat::expect_match(
+    qc_text,
+    '"${dtangle_metadata_arguments[@]}"',
+    fixed = TRUE
+  )
+  testthat::expect_false(grepl(
+    'then "--covariates " + select_first',
+    tca_text,
+    fixed = TRUE
+  ))
+  testthat::expect_false(grepl(
+    'then "--parameters-json " + select_first',
+    qc_text,
+    fixed = TRUE
+  ))
+})
+
+testthat::test_that("FitTca logs decompressed gene and sample dimensions", {
+  text <- wdl_text("workflows/tasks/tca.wdl")
+
+  testthat::expect_match(
+    text,
+    "gzip -cd outputs/tca_expression.tsv.gz",
+    fixed = TRUE
+  )
+  testthat::expect_match(text, "genes:%s,samples:%s", fixed = TRUE)
+  testthat::expect_false(grepl(
+    "wc -l < outputs/tca_expression.tsv.gz",
+    text,
+    fixed = TRUE
+  ))
 })
 
 testthat::test_that("the logging checker rejects incomplete command logging", {

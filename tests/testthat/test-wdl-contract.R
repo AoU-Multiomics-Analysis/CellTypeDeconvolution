@@ -87,12 +87,48 @@ testthat::test_that("all modular WDL tasks declare CLI-aligned interfaces", {
 
 testthat::test_that("the logging checker rejects incomplete command logging", {
   fixture <- tempfile(fileext = ".wdl")
+  checker_path <- testthat::test_path(
+    "../..", "tools", "check_wdl_logging.py"
+  )
   writeLines(c(
     "version 1.1", "task MissingLogging {", "  command <<<", "    echo hello", "  >>>", "}"
   ), fixture)
   status <- system2(
-    "python3", c("tools/check_wdl_logging.py", fixture), stdout = FALSE,
+    "python3", c(checker_path, fixture), stdout = FALSE,
     stderr = FALSE
   )
   testthat::expect_false(identical(status, 0L))
+})
+
+testthat::test_that("the logging checker checks brace-form commands", {
+  incomplete_fixture <- tempfile(fileext = ".wdl")
+  complete_fixture <- tempfile(fileext = ".wdl")
+  checker_path <- testthat::test_path(
+    "../..", "tools", "check_wdl_logging.py"
+  )
+  writeLines(c(
+    "version 1.1", "task MissingBraceLogging {", "  command {",
+    "    echo 'stage=brace start_time=now'", "  }", "}"
+  ), incomplete_fixture)
+  writeLines(c(
+    "version 1.1", "task CompleteBraceLogging {", "  command {",
+    "    echo 'stage=brace start_time=now completion_time=now dimensions=1 outputs=result'",
+    "  }", "}"
+  ), complete_fixture)
+
+  incomplete_status <- system2(
+    "python3", c(checker_path, incomplete_fixture),
+    stdout = FALSE, stderr = FALSE
+  )
+  complete_status <- system2(
+    "python3", c(checker_path, complete_fixture),
+    stdout = FALSE, stderr = FALSE
+  )
+  miniwdl_status <- system2(
+    "miniwdl", c("check", complete_fixture), stdout = FALSE, stderr = FALSE
+  )
+
+  testthat::expect_false(identical(incomplete_status, 0L))
+  testthat::expect_identical(complete_status, 0L)
+  testthat::expect_identical(miniwdl_status, 0L)
 })

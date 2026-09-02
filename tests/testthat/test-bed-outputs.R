@@ -400,6 +400,35 @@ testthat::test_that("pipeline QC records validation, row sums, duplicates, and c
     tca_log_lines = tca_log,
     dtangle_metadata = dtangle_metadata
   )
+  expected_metric_prefix <- c(
+    "gene_count",
+    "sample_count",
+    "lm22_gene_count",
+    "lm22_cell_type_count",
+    "lm22_value_min",
+    "lm22_value_max",
+    "lm22_value_validation",
+    "input_proportion_max_row_sum_error",
+    "combined_proportion_max_row_sum_error",
+    "adjusted_weight_max_row_sum_error",
+    "normalization_adjustment_max_abs",
+    "zero_values_adjusted"
+  )
+  expected_metric_suffix <- c(
+    "tca_internal_iterations",
+    "tca_max_internal_iterations",
+    "tca_convergence",
+    "tca_tau_hat"
+  )
+  testthat::expect_identical(
+    summary$metric,
+    c(
+      expected_metric_prefix,
+      "duplicate_gene_symbol_input_row_count",
+      "duplicate_gene_symbol_count",
+      expected_metric_suffix
+    )
+  )
   metric_value <- stats::setNames(summary$value, summary$metric)
   metric_status <- stats::setNames(summary$status, summary$metric)
 
@@ -442,6 +471,10 @@ testthat::test_that("pipeline QC records validation, row sums, duplicates, and c
   )
   testthat::expect_false(
     "duplicate_gene_symbol_count" %in% summary_without_mapping$metric
+  )
+  testthat::expect_identical(
+    summary_without_mapping$metric,
+    c(expected_metric_prefix, expected_metric_suffix)
   )
 })
 

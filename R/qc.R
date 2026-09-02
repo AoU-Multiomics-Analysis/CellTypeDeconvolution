@@ -432,6 +432,11 @@ build_pipeline_qc_summary <- function(
       "fitted"
     )
   )
+  proportion_summary <- dplyr::bind_rows(
+    dplyr::slice(proportion_summary, 1L:5L),
+    mapping_summary,
+    dplyr::slice(proportion_summary, 6L:nrow(proportion_summary))
+  )
   lm22_status <- if (is.null(dtangle_metadata)) {
     tibble::tibble(
       metric = c(
@@ -468,7 +473,7 @@ build_pipeline_qc_summary <- function(
       status = "passed"
     )
   }
-  dplyr::bind_rows(base_summary, lm22_status, mapping_summary, proportion_summary)
+  dplyr::bind_rows(base_summary, lm22_status, proportion_summary)
 }
 
 validate_manifest_outputs <- function(outputs) {

@@ -93,7 +93,7 @@ jobs:
 
       - name: Upload failure logs and QC artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pipeline-ci-failure-${{ github.run_id }}
           path: |
